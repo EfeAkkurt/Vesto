@@ -39,6 +39,33 @@ This is a Next.js 15 project using the App Router pattern with the following key
 - Ignores build artifacts, node_modules, and Next.js generated files
 - No testing framework currently configured
 
+## Project Structure
+- Uses Next.js App Router with all application code in the `app/` directory
+- Components organized in the `components/` directory with reusable UI components
+- Path aliasing configured with `@/*` pointing to the root directory
+- TypeScript configuration includes strict mode and Next.js plugin
+
+### Key Components
+- **HeroSection** (`components/hero-section.tsx`): Main landing section with parallax card animation
+  - Includes navigation, main heading, and animated card placeholder
+  - Uses Framer Motion for scroll-based animations (y, scale, rotateX transforms)
+  - Features glass-morphism design with backdrop blur effects
+  - Card animates from below viewport (y: -48→0), scales up (0.91→1), and rotates flat (12.3°→0°)
+
+### UI Components
+- **Button** (`components/ui/button.tsx`): Custom button component with variants
+- Additional shadcn/ui components available in `components/ui/` directory
+
 ## Development Notes
 
-This appears to be a fresh Next.js project with minimal customization beyond the default template. The inclusion of Stellar SDK suggests this may be intended for blockchain/financial applications, likely related to the Stellar network. The project uses modern React patterns and is set up for TypeScript development with strict type checking.
+Vesto is a blockchain platform for tokenizing real-world assets on the Stellar network. The project features a modern, responsive design with smooth scroll animations and glass-morphism effects. Currently in development with a focus on creating an engaging landing page experience.
+
+### Animation Patterns
+- Scroll-based parallax effects using Framer Motion's `useScroll` and `useTransform`
+- Staggered entrance animations for UI elements
+- Glass-morphism design with backdrop blur and transparency effects
+
+### Design System
+- Color scheme: Dark theme with violet accents and glass-morphism effects
+- Typography: Geist Sans for clean, modern look
+- Animations: Smooth transitions with spring physics

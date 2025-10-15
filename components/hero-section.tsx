@@ -2,7 +2,7 @@
 
 import type React from "react"
 
-import { motion } from "framer-motion"
+import { motion, useScroll, useTransform } from "framer-motion"
 import Image from "next/image"
 import { Button } from "@/components/ui/button"
 
@@ -20,17 +20,34 @@ const Wallet = (props: React.SVGProps<SVGSVGElement>) => (
     <path d="M18 12h2" />
   </svg>
 )
-const Shield = (props: React.SVGProps<SVGSVGElement>) => (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" {...props}>
-    <path d="M12 2l7 4v6c0 5-3.5 9-7 10-3.5-1-7-5-7-10V6l7-4z" />
-  </svg>
-)
-const TrendingUp = (props: React.SVGProps<SVGSVGElement>) => (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" {...props}>
-    <path d="M3 17l6-6 4 4 7-7" />
-    <path d="M14 7h7v7" />
-  </svg>
-)
+
+function HeroParallaxCard() {
+  const { scrollYProgress } = useScroll();
+  const y = useTransform(scrollYProgress, [0, 1], [-48, 0]);
+  const scale = useTransform(scrollYProgress, [0, 1], [0.911893, 1]);
+  const rotateX = useTransform(scrollYProgress, [0, 1], [12.335, 0]);
+
+  return (
+    <div className="relative mx-auto max-w-3xl p-4 [perspective:1200px]">
+      <motion.div
+        style={{ y, scale, rotateX, willChange: "transform" }}
+        className="rounded-[33px] overflow-hidden [transform-style:preserve-3d] border border-white/20 bg-white/10 backdrop-blur-md"
+      >
+          <div className="relative aspect-[16/10] flex items-center justify-center">
+          <div className="text-white/40 text-center">
+            <div className="w-24 h-24 mx-auto mb-4 border-2 border-dashed border-white/30 rounded-lg flex items-center justify-center">
+              <svg className="w-12 h-12 text-white/30" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+              </svg>
+            </div>
+            <p className="text-sm">Image placeholder</p>
+            <p className="text-xs mt-1">Resim daha sonra eklenecek</p>
+          </div>
+        </div>
+      </motion.div>
+    </div>
+  );
+}
 
 export function HeroSection() {
   return (
@@ -122,59 +139,18 @@ export function HeroSection() {
           <span className="text-violet-400">Assets On-Chain</span>
         </motion.h1>
 
-        {/* Subheading */}
-        <motion.p
+        {/* Hero Parallax Card Placeholder */}
+        <motion.div
           initial={{ y: 20, opacity: 0 }}
           animate={{ y: 0, opacity: 1 }}
           transition={{ duration: 0.6, delay: 0.4 }}
-          className="text-lg md:text-xl text-white/80 max-w-3xl mx-auto mb-12 text-balance leading-relaxed"
+          className="mt-12"
         >
-          Transform invoices, subscriptions, and income streams into tradeable tokens. Transparent custody, automated
-          distributions, and institutional-grade proof-of-reserve.
-        </motion.p>
-
-        {/* CTA Buttons */}
-        <motion.div
-          initial={{ y: 20, opacity: 0 }}
-          animate={{ y: 0, opacity: 1 }}
-          transition={{ duration: 0.6, delay: 0.5 }}
-          className="flex flex-col sm:flex-row items-center justify-center gap-4 mb-20"
-        >
-          <Button size="lg" className="gap-2 text-base px-8 py-6">
-            Start Tokenizing
-            <ArrowRight className="w-5 h-5" />
-          </Button>
-          <Button size="lg" variant="outline" className="gap-2 text-base px-8 py-6">
-            View Documentation
-          </Button>
+          <HeroParallaxCard />
         </motion.div>
 
-        {/* Feature Cards */}
-        <motion.div
-          initial={{ y: 40, opacity: 0 }}
-          animate={{ y: 0, opacity: 1 }}
-          transition={{ duration: 0.8, delay: 0.6 }}
-          className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-5xl mx-auto"
-        >
-          <FeatureCard
-            icon={<Shield className="w-6 h-6" />}
-            title="Proof-of-Reserve"
-            description="Weekly attestations with IPFS-backed transparency"
-            delay={0.7}
-          />
-          <FeatureCard
-            icon={<TrendingUp className="w-6 h-6" />}
-            title="Automated Yield"
-            description="One-click distribution to token holders"
-            delay={0.8}
-          />
-          <FeatureCard
-            icon={<Wallet className="w-6 h-6" />}
-            title="Multi-Chain Bridge"
-            description="Seamless cross-chain asset transfers"
-            delay={0.9}
-          />
-        </motion.div>
+
+
       </div>
 
       {/* Scroll Indicator */}
@@ -196,27 +172,3 @@ export function HeroSection() {
   )
 }
 
-interface FeatureCardProps {
-  icon: React.ReactNode
-  title: string
-  description: string
-  delay: number
-}
-
-function FeatureCard({ icon, title, description, delay }: FeatureCardProps) {
-  return (
-    <motion.div
-      initial={{ y: 20, opacity: 0 }}
-      animate={{ y: 0, opacity: 1 }}
-      transition={{ duration: 0.6, delay }}
-      whileHover={{ y: -4, transition: { duration: 0.2 } }}
-      className="bg-white/5 backdrop-blur-sm border border-white/10 rounded-xl p-6 text-left hover:border-white/20 transition-colors text-white"
-    >
-      <div className="w-12 h-12 bg-white/10 rounded-lg flex items-center justify-center mb-4 text-white">
-        {icon}
-      </div>
-      <h3 className="text-lg font-semibold mb-2">{title}</h3>
-      <p className="text-sm text-white/70 leading-relaxed">{description}</p>
-    </motion.div>
-  )
-}
