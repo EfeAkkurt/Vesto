@@ -37,7 +37,9 @@ npm run lint && npm run build
 - Keep dependencies minimal; discuss adding new ones in the PR description.
 
 ## Agent-Specific Instructions
+- Prioritize dashboard build-out per `todo.md` before tackling ancillary tasks.
 - Make smallest viable changes; avoid restructuring without clear rationale.
 - Follow the conventions above for files under `app/` and configs.
 - When creating new UI, colocate components near their route folder or in `app/components/` if shared.
-- Always run `npm run lint` before finishing a change.
+- Always run `npm run lint` before finishing a change, and attempt `npm run build` to verify type safety.
+- Document sandbox limitations (e.g., `npm run dev` restrictions) in the final handoff.

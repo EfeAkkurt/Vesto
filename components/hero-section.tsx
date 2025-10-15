@@ -4,6 +4,7 @@ import type React from "react"
 
 import { motion, useScroll, useTransform } from "framer-motion"
 import Image from "next/image"
+import Link from "next/link"
 import ConnectButton from "@/components/ConnectButton"
 import NetworkStatus from "@/components/NetworkStatus"
 
@@ -83,18 +84,21 @@ export function HeroSection() {
             transition={{ delay: 0.3 }}
             className="hidden md:flex items-center gap-8"
           >
-            <a href="#tokenize" className="text-sm text-white/80 hover:text-white transition-colors">
+            <Link href="/dashboard" className="text-sm text-white/80 hover:text-white transition-colors">
+              Dashboard
+            </Link>
+            <Link href="/tokenize" className="text-sm text-white/80 hover:text-white transition-colors">
               Tokenize
-            </a>
-            <a href="#custodian" className="text-sm text-white/80 hover:text-white transition-colors">
+            </Link>
+            <Link href="/custodian" className="text-sm text-white/80 hover:text-white transition-colors">
               Custodian
-            </a>
-            <a href="#proof" className="text-sm text-white/80 hover:text-white transition-colors">
-              Proof
-            </a>
-            <a href="#bridge" className="text-sm text-white/80 hover:text-white transition-colors">
+            </Link>
+            <Link href="/proofs" className="text-sm text-white/80 hover:text-white transition-colors">
+              Proofs
+            </Link>
+            <Link href="/bridge" className="text-sm text-white/80 hover:text-white transition-colors">
               Bridge
-            </a>
+            </Link>
           </motion.div>
 
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.4 }} className="flex items-center gap-3">

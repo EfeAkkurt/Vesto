@@ -1,9 +1,7 @@
 "use client"
 
 import type React from "react"
-import { motion } from "framer-motion"
 import { GlowHalo } from "./GlowHalo"
-import Image from "next/image"
 
 export function SectionContainer({
   children,

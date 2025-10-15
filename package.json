@@ -15,7 +15,8 @@
     "react": "19.1.0",
     "react-dom": "19.1.0",
     "stellar-sdk": "^13.3.0",
-    "@stellar/freighter-api": "^2.0.2"
+    "@stellar/freighter-api": "^5.0.0",
+    "recharts": "^2.12.7"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3",
