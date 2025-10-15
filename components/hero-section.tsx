@@ -4,7 +4,8 @@ import type React from "react"
 
 import { motion, useScroll, useTransform } from "framer-motion"
 import Image from "next/image"
-import { Button } from "@/components/ui/button"
+import ConnectButton from "@/components/ConnectButton"
+import NetworkStatus from "@/components/NetworkStatus"
 
 // Inline icons to avoid external deps
 const ArrowRight = (props: React.SVGProps<SVGSVGElement>) => (
@@ -13,19 +14,11 @@ const ArrowRight = (props: React.SVGProps<SVGSVGElement>) => (
     <path d="M12 5l7 7-7 7" />
   </svg>
 )
-const Wallet = (props: React.SVGProps<SVGSVGElement>) => (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" {...props}>
-    <rect x="2" y="7" width="20" height="14" rx="2" />
-    <path d="M16 7V5a3 3 0 0 0-3-3H4v5" />
-    <path d="M18 12h2" />
-  </svg>
-)
-
 function HeroParallaxCard() {
   const { scrollYProgress } = useScroll();
-  const y = useTransform(scrollYProgress, [0, 1], [-48, 0]);
-  const scale = useTransform(scrollYProgress, [0, 1], [0.911893, 1]);
-  const rotateX = useTransform(scrollYProgress, [0, 1], [12.335, 0]);
+const y       = useTransform(scrollYProgress, [0, 0.06], [-62, 0]);      // start slightly higher for depth
+const scale   = useTransform(scrollYProgress, [0, 0.06], [0.86, 1]);     // scale up as the user scrolls
+const rotateX = useTransform(scrollYProgress, [0, 0.03], [35, 0]);
 
   return (
     <div className="relative mx-auto max-w-3xl p-4 [perspective:1200px]">
@@ -41,7 +34,7 @@ function HeroParallaxCard() {
               </svg>
             </div>
             <p className="text-sm">Image placeholder</p>
-            <p className="text-xs mt-1">Resim daha sonra eklenecek</p>
+            <p className="text-xs mt-1">Artwork to be added soon</p>
           </div>
         </div>
       </motion.div>
@@ -104,11 +97,9 @@ export function HeroSection() {
             </a>
           </motion.div>
 
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.4 }}>
-            <Button variant="outline" size="sm" className="gap-2">
-              <Wallet className="w-4 h-4" />
-              Connect Wallet
-            </Button>
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.4 }} className="flex items-center gap-3">
+            <NetworkStatus />
+            <ConnectButton />
           </motion.div>
         </div>
       </motion.nav>
@@ -171,4 +162,3 @@ export function HeroSection() {
     </section>
   )
 }
-
