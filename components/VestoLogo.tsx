@@ -1,7 +1,7 @@
 "use client";
 
 import { useAnimationControls, motion } from "framer-motion";
-import { useCallback } from "react";
+import { useCallback, useEffect } from "react";
 
 export type VestoLogoProps = {
   className?: string;
@@ -12,10 +12,13 @@ const ease = [0.33, 1, 0.68, 1] as const;
 
 export function VestoLogo({ className, size = 40 }: VestoLogoProps) {
   const controls = useAnimationControls();
-
   const reset = useCallback(() => {
-    controls.set({ rotate: 0 });
+    void controls.start({ rotate: 0, transition: { duration: 0.001 } });
   }, [controls]);
+
+  useEffect(() => {
+    reset();
+  }, [reset]);
 
   const spin = useCallback(
     async (rotations: number, duration: number) => {
@@ -26,7 +29,7 @@ export function VestoLogo({ className, size = 40 }: VestoLogoProps) {
   );
 
   const handleHover = useCallback(() => {
-    void spin(2, 1.2);
+    void spin(1, 0.8);
   }, [spin]);
 
   const handleClick = useCallback(() => {
@@ -47,6 +50,7 @@ export function VestoLogo({ className, size = 40 }: VestoLogoProps) {
       onHoverEnd={reset}
       tabIndex={-1}
       aria-hidden
+      style={{ overflow: "visible" }}
     >
       <defs>
         <linearGradient id="vestoGrad" x1="20" y1="10" x2="180" y2="190" gradientUnits="userSpaceOnUse">
