@@ -5,7 +5,7 @@ import { motion } from "framer-motion";
 
 export default function FooterLanding() {
   return (
-    <footer className="relative mt-32">
+    <footer className="relative bg-black">
       <div className="mx-auto max-w-7xl px-6">
         <motion.svg
           viewBox="0 0 1123 240"
