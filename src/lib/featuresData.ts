@@ -34,7 +34,7 @@ export const features: FeatureItem[] = [
     id: "bridge",
     title: "Bridge & Stablecoin",
     desc: "Cross-chain transfers with stablecoin rails and fee transparency.",
-    icon: "Shuffle",
+    icon: "ArrowLeftRight",
   },
   {
     id: "proofs",

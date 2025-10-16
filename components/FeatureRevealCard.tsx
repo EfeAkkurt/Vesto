@@ -28,13 +28,14 @@ export default function FeatureRevealCard({
       animate={{}}
       whileHover={{ y: -2, boxShadow: "0 8px 30px rgba(0,0,0,0.25)" }}
       transition={{ duration: 0.2, ease: [0.33, 1, 0.68, 1] }}
-      className={`group relative w-full rounded-[40px] border border-[rgb(36,36,36)] bg-[rgb(36,36,36)]/100 p-5 shadow-lg backdrop-blur-sm sm:p-6 ${className}`}
+      className={`group relative w-full rounded-[40px] border border-gray-900 bg-black p-5 shadow-lg backdrop-blur-sm sm:p-6 ${className}`}
+      onClick={() => setOpen((value) => !value)}
     >
       <button
         type="button"
-        onClick={() => setOpen((value) => !value)}
+        onClick={(e) => e.stopPropagation()}
         aria-expanded={open}
-        className="flex w-full items-center justify-between gap-4 rounded-[28px] px-2 py-1 text-left focus:outline-none"
+        className="flex w-full items-center justify-between gap-4 rounded-[28px] px-2 py-1 text-left focus:outline-none pointer-events-none"
       >
         <div className="flex min-w-0 items-center gap-4">
           <div
@@ -59,7 +60,7 @@ export default function FeatureRevealCard({
           </div>
         </div>
         <div
-          className="flex h-9 w-9 items-center justify-center rounded-[16px] border"
+          className="flex h-9 w-9 items-center justify-center rounded-[16px] border transition-all duration-200 group-hover:border-opacity-100"
           style={{ borderColor: accent }}
           aria-hidden
         >
@@ -69,8 +70,8 @@ export default function FeatureRevealCard({
             transition={{ duration: 0.2 }}
             className="relative h-3 w-3"
           >
-            <span className="absolute inset-0" style={{ backgroundColor: accent, height: 2 }} />
-            <span className="absolute inset-0" style={{ backgroundColor: accent, width: 2 }} />
+            <span className="absolute left-0 top-1/2 h-0.5 w-3 -translate-y-1/2 bg-white" />
+            <span className="absolute left-1/2 top-0 h-3 w-0.5 -translate-x-1/2 bg-white" />
           </motion.div>
         </div>
       </button>

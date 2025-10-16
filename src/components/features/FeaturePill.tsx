@@ -30,17 +30,29 @@ export function FeaturePill({ id, title, desc, Icon, isOpen, onToggle }: Feature
   );
 
   const actionStroke = cn(
-    "rounded bg-white",
+    "absolute rounded bg-white",
     isOpen ? "bg-[#0F1410]" : "bg-white",
-    !isOpen && "group-hover:bg-[#0F1410]",
   );
 
-  const handleToggle = () => onToggle(id);
+  const toggle = () => onToggle(id);
+
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      toggle();
+    }
+  };
 
   return (
-    <motion.article
+    <motion.div
       layout
-      className="group relative w-full rounded-[32px] border border-white/10 bg-card/80 px-4 py-4 transition-all sm:px-6"
+      role="button"
+      tabIndex={0}
+      aria-expanded={isOpen}
+      aria-controls={`feature-${id}`}
+      onClick={toggle}
+      onKeyDown={handleKeyDown}
+      className="group relative w-full cursor-pointer rounded-[32px] border border-white/10 bg-card/80 px-4 py-4 transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-[#ADD015]/40 sm:px-6"
       whileHover={prefersReducedMotion ? undefined : { y: -1 }}
     >
       <div className="flex items-center gap-4 md:items-start">
@@ -48,28 +60,20 @@ export function FeaturePill({ id, title, desc, Icon, isOpen, onToggle }: Feature
           <Icon className="h-5 w-5" />
         </div>
         <div className="min-w-0 flex-1">
-          <button
-            type="button"
-            onClick={handleToggle}
-            aria-expanded={isOpen}
-            aria-controls={`feature-${id}`}
-            className="flex w-full items-center justify-between gap-4 text-left focus:outline-none"
-          >
-            <div className="min-w-0">
-              <h3 className="text-base font-semibold text-foreground md:text-lg">{title}</h3>
-            </div>
-            <span className={actionBorder}>
+          <div className="flex items-center justify-between gap-4">
+            <h3 className="text-base font-semibold text-foreground md:text-lg">{title}</h3>
+            <span className={actionBorder} aria-hidden>
               <motion.span
                 initial={false}
                 animate={{ rotate: isOpen ? 45 : 0 }}
                 transition={{ duration: 0.2 }}
                 className="relative flex h-3 w-3 items-center justify-center"
               >
-                <span className={cn("absolute h-0.5 w-3", actionStroke)} />
-                <span className={cn("absolute w-0.5 h-3", actionStroke)} />
+                <span className={cn("h-0.5 w-3", actionStroke)} />
+                <span className={cn("w-0.5 h-3", actionStroke)} />
               </motion.span>
             </span>
-          </button>
+          </div>
           <AnimatePresence initial={false}>
             {isOpen ? (
               <motion.div
@@ -87,7 +91,7 @@ export function FeaturePill({ id, title, desc, Icon, isOpen, onToggle }: Feature
           </AnimatePresence>
         </div>
       </div>
-    </motion.article>
+    </motion.div>
   );
 }
 

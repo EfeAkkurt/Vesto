@@ -1,7 +1,7 @@
 "use client";
 
 import { motion } from "framer-motion";
-import { Layers3, ShieldCheck, Wallet, PieChart, Link2, FileCheck, Share2 } from "lucide-react";
+import { Layers3, ShieldCheck, Wallet, PieChart, GitBranch, FileCheck, Share2 } from "lucide-react";
 import FeatureRevealCard from "@/components/FeatureRevealCard";
 
 const features = [
@@ -72,7 +72,7 @@ const features = [
   {
     title: "Bridge & Stablecoin Integration",
     accent: "#8BD67C",
-    icon: <Link2 className="h-4 w-4" />,
+    icon: <GitBranch className="h-4 w-4" />,
     content: (
       <>
         <p className="mb-2">

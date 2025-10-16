@@ -41,13 +41,14 @@ const ICONS: Record<string, IconComponent> = {
       <circle cx="12" cy="12" r="3" />
     </svg>
   )),
-  Shuffle: svgFactory((props) => (
+  ArrowLeftRight: svgFactory((props) => (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden {...props}>
-      <path d="M16 3H21V8" strokeLinecap="round" strokeLinejoin="round" />
-      <path d="M9 7L15 13" />
-      <path d="M21 16V21H16" strokeLinecap="round" strokeLinejoin="round" />
-      <path d="M15 11L21 5" />
-      <path d="M3 17H7L15 9" strokeLinecap="round" />
+      <path d="M8 3L4 7L8 11" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M16 3L20 7L16 11" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M4 7H20" strokeLinecap="round" />
+      <path d="M4 17L8 21L12 17" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M12 17L16 13L20 17" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M4 17H20" strokeLinecap="round" />
     </svg>
   )),
   FileCheck2: svgFactory((props) => (
