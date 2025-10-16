@@ -208,22 +208,7 @@ export function StatsSection() {
           </div>
         </div>
 
-        {/* Bottom CTA */}
-        <motion.div
-          initial={{ y: 30, opacity: 0 }}
-          whileInView={{ y: 0, opacity: 1 }}
-          transition={{ duration: 0.8, delay: 0.4 }}
-          viewport={{ once: true }}
-          className="text-center mt-32"
-        >
-          <h3 className="text-2xl font-semibold text-white mb-4">
-            Join thousands of users already tokenizing their assets
-          </h3>
-          <button className="px-8 py-4 bg-gradient-to-r from-violet-600 to-purple-600 hover:from-violet-700 hover:to-purple-700 text-white font-semibold rounded-lg transition-all duration-300 transform hover:scale-105">
-            Start Tokenizing Today
-          </button>
-        </motion.div>
-      </div>
+        </div>
 
       {/* Custom scrollbar styles */}
       <style jsx>{`

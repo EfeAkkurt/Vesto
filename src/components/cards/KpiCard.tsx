@@ -6,7 +6,7 @@ import { BadgeDelta } from "@/src/components/ui/BadgeDelta";
 import { Skeleton } from "@/src/components/ui/Skeleton";
 import { Tooltip } from "@/src/components/ui/Tooltip";
 import { transitions, fadeInUp } from "@/src/components/motion/presets";
-import { formatCurrency, formatNumber, formatPercent } from "@/src/utils/format";
+import { formatCurrency, formatNumber, formatPercent } from "@/src/lib/utils/format";
 
 export type KpiCardProps = {
   title: string;

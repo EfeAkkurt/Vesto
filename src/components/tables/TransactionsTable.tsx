@@ -6,7 +6,7 @@ import { motion, useReducedMotion } from "framer-motion";
 import type { Transaction } from "@/src/lib/mockData";
 import { CopyHash } from "@/src/components/ui/CopyHash";
 import { Skeleton } from "@/src/components/ui/Skeleton";
-import { formatCurrency, formatDateTime } from "@/src/utils/format";
+import { formatCurrency, formatDateTime } from "@/src/lib/utils/format";
 import { transitions, stagger, listItem } from "@/src/components/motion/presets";
 
 const typeFilters = [
@@ -147,7 +147,7 @@ export const TransactionsTable = ({ transactions, isLoading }: TransactionsTable
                   </td>
                   <td className="py-3 pr-6">
                     <div className="flex items-center gap-2">
-                      <CopyHash hash={tx.hash} />
+                      <CopyHash value={tx.hash} />
                       <Link
                         href={`https://stellar.expert/explorer/${tx.hash}`}
                         target="_blank"

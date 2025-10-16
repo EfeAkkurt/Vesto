@@ -1,7 +1,7 @@
 "use client";
 import { useEffect } from "react";
 import { registerGlobalErrorLogging, logger, LogEntry } from "@/lib/logging/logger";
-import { useToast } from "@/components/ui/toast";
+import { useToast } from "@/src/components/ui/Toast";
 
 export function ClientErrorLogger() {
   const { push } = useToast();

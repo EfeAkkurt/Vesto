@@ -14,7 +14,7 @@ import {
 } from "recharts";
 import type { Holding } from "@/src/lib/mockData";
 import { ChartWrapper } from "@/src/components/charts/ChartWrapper";
-import { formatCurrency } from "@/src/utils/format";
+import { formatCurrency } from "@/src/lib/utils/format";
 
 const colors = {
   rwa: "var(--color-primary)",

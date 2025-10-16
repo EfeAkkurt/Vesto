@@ -13,7 +13,7 @@ import {
 import type { Attestation } from "@/src/lib/mockData";
 import { ChartWrapper } from "@/src/components/charts/ChartWrapper";
 import { CopyHash } from "@/src/components/ui/CopyHash";
-import { formatDate } from "@/src/utils/format";
+import { formatDate } from "@/src/lib/utils/format";
 
 const colors: Record<Attestation["status"], string> = {
   ok: "var(--color-primary)",
@@ -117,7 +117,7 @@ export const DonutAttestations = ({ attestations, isLoading }: DonutAttestations
                 </p>
               </div>
               <div className="flex flex-col items-end gap-2">
-                <CopyHash hash={item.ipfs} className="border-transparent bg-transparent px-0 py-0" truncate={false} />
+                <CopyHash value={item.ipfs} className="border-transparent bg-transparent px-0 py-0" short={false} />
                 <Link
                   href={`https://ipfs.io/ipfs/${item.ipfs}`}
                   target="_blank"

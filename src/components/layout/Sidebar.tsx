@@ -1,15 +1,16 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import VestoLogo from "@/components/VestoLogo";
 import type { WalletHook } from "@/src/hooks/useWallet";
-import type { NetworkHealth, StellarNetwork } from "@/src/lib/mockData";
+import type { NetworkHealth } from "@/src/lib/mockData";
 import { SIDEBAR_NAV } from "@/src/utils/constants";
 import { cn } from "@/src/utils/cn";
-import { shortAddress, formatCurrency } from "@/src/utils/format";
-import { useToast } from "@/components/ui/toast";
-import { Button } from "@/components/ui/button";
+import { shortAddress, formatCurrency } from "@/src/lib/utils/format";
+import ConnectWalletButton from "@/components/ConnectWalletButton";
+import NetworkStatus from "@/components/NetworkStatus";
 
 const NavIcon = ({ icon }: { icon: (typeof SIDEBAR_NAV)[number]["icon"] }) => {
   const props = { className: "size-5", viewBox: "0 0 24 24", stroke: "currentColor", strokeWidth: 1.6, fill: "none" } as const;
@@ -63,7 +64,6 @@ type SidebarProps = {
   collapsed?: boolean;
   isOpen?: boolean;
   onCloseMobile?: () => void;
-  onSelectNetwork?: (network: StellarNetwork) => void;
 };
 
 export const Sidebar = ({
@@ -72,59 +72,16 @@ export const Sidebar = ({
   collapsed = false,
   isOpen = true,
   onCloseMobile,
-  onSelectNetwork,
 }: SidebarProps) => {
   const pathname = usePathname();
-  const { push } = useToast();
-  const [isSwitching, setIsSwitching] = useState(false);
-
   const activeKey = useMemo(() => SIDEBAR_NAV.find((item) => pathname.startsWith(item.href))?.key, [pathname]);
-
-  const currentNetwork = wallet.network ?? wallet.preferredNetwork;
-  const nextNetwork: StellarNetwork = currentNetwork === "TestNet" ? "Mainnet" : "TestNet";
-  const networkStyles = currentNetwork === "TestNet"
-    ? { bg: "bg-amber-500/10", border: "border-amber-500/30", text: "text-amber-100", dot: "bg-amber-400" }
-    : { bg: "bg-emerald-500/10", border: "border-emerald-500/30", text: "text-emerald-100", dot: "bg-emerald-400" };
-
-  const handleConnectClick = () => {
-    if (wallet.status === "connected") {
-      wallet.controls.disconnect();
-      push({
-        title: "Wallet disconnected",
-        description: `Session ended for ${shortAddress(wallet.address ?? "")} · reconnect anytime from the sidebar.`,
-        variant: "info",
-      });
-      return;
-    }
-    wallet.controls.connect();
-    push({
-      title: "Requesting signature",
-      description: "Approve the Freighter prompt to connect.",
-      variant: "info",
-    });
-  };
-
-  const handleNetworkSwitch = async () => {
-    if (isSwitching) return;
-    setIsSwitching(true);
-    try {
-      await onSelectNetwork?.(nextNetwork);
-      push({
-        title: `Switched to ${nextNetwork}`,
-        description: "Dashboard data will sync to the selected Horizon network.",
-        variant: "success",
-      });
-    } finally {
-      setIsSwitching(false);
-    }
-  };
 
   const statusChip = wallet.status === "connected"
     ? "Connected"
     : wallet.status === "connecting"
     ? "Connecting"
     : wallet.status === "wrong-network"
-    ? "Network issue"
+    ? "Check network"
     : "Wallet";
 
   return (
@@ -140,14 +97,12 @@ export const Sidebar = ({
     >
       <div className="flex h-16 items-center justify-center border-b border-border/30 px-4">
         <Link href="/" className="flex items-center gap-2" aria-label="Vesto dashboard home">
-          <span className="inline-flex size-9 items-center justify-center rounded-xl bg-primary/20 text-lg font-semibold text-primary">
-            V
-          </span>
+          <VestoLogo size={32} className="text-primary" />
           <span className="hidden text-sm font-semibold tracking-tight text-foreground md:inline">Vesto</span>
         </Link>
       </div>
       <nav className="flex-1 overflow-y-auto px-2 py-4">
-        <ul className="flex flex-col gap-1">
+        <ul className="flex flex-col gap-2">
           {SIDEBAR_NAV.map((item) => {
             const isActive = item.key === activeKey;
             return (
@@ -156,7 +111,7 @@ export const Sidebar = ({
                   href={item.href}
                   onClick={onCloseMobile}
                   className={cn(
-                    "group flex items-center gap-3 rounded-xl px-3 py-2 text-sm font-medium transition",
+                    "group flex items-center gap-4 rounded-xl px-4 py-2.5 text-sm font-medium transition",
                     "hover:bg-primary/10 hover:text-primary",
                     isActive && "bg-primary/10 text-primary",
                   )}
@@ -177,23 +132,25 @@ export const Sidebar = ({
               {statusChip}
             </span>
           </div>
-          {wallet.status === "connected" ? (
+          {wallet.status === "connected" && wallet.address ? (
             <div className="mt-4 space-y-4 text-sm">
               <div>
                 <p className="text-xs uppercase tracking-wider text-muted-foreground">Address</p>
                 <p className="mt-1 font-mono text-lg text-foreground/90">
-                  {shortAddress(wallet.address ?? "")}
+                  {shortAddress(wallet.address)}
                 </p>
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-muted-foreground">Portfolio</span>
                 <span className="text-lg font-semibold text-primary">
-                  {formatCurrency(wallet.balanceUSD ?? 0, { compact: true })}
+                  {wallet.balanceUSD != null ? formatCurrency(wallet.balanceUSD, { compact: true }) : "—"}
                 </span>
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-muted-foreground">Native</span>
-                <span className="font-semibold text-foreground/80">{wallet.balanceNative ?? 0} XLM</span>
+                <span className="font-semibold text-foreground/80">
+                  {wallet.balanceNative != null ? `${wallet.balanceNative} XLM` : "—"}
+                </span>
               </div>
             </div>
           ) : (
@@ -201,45 +158,17 @@ export const Sidebar = ({
               Connect Freighter to view balances and trigger payouts.
             </p>
           )}
+          {wallet.status === "wrong-network" ? (
+            <p className="mt-3 rounded-xl border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-100">
+              Switch networks in Freighter to match the preferred environment.
+            </p>
+          ) : null}
           <div className="mt-5 space-y-3">
-            <button
-              type="button"
-              onClick={handleNetworkSwitch}
-              disabled={isSwitching}
-              className={cn(
-                "flex w-full items-center justify-between rounded-xl border px-3 py-2 text-xs font-semibold uppercase tracking-wide transition",
-                networkStyles.bg,
-                networkStyles.border,
-                networkStyles.text,
-                isSwitching && "opacity-70",
-              )}
-            >
-              <span className="flex items-center gap-2">
-                <span className={cn("h-2 w-2 rounded-full", networkStyles.dot)} aria-hidden />
-                {currentNetwork}
-              </span>
-              <span className="text-[10px] font-medium uppercase tracking-wide text-white/80">
-                {isSwitching ? "switching" : "switch"}
-              </span>
-            </button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleConnectClick}
-              disabled={wallet.status === "connecting"}
-              className="w-full justify-center border-white/20 text-white hover:bg-white/10"
-            >
-              {wallet.status === "connecting"
-                ? "Connecting…"
-                : wallet.status === "connected" && wallet.address
-                  ? `Disconnect · ${shortAddress(wallet.address)}`
-                  : "Connect Wallet"}
-            </Button>
+            <NetworkStatus />
+            <ConnectWalletButton />
             <div className="flex items-center justify-between rounded-xl border border-border/40 bg-border/10 px-3 py-2 text-xs uppercase tracking-wide text-foreground/70">
               <span>{networkHealth.network}</span>
-              <span className={cn(networkHealth.horizonHealthy ? "text-primary" : "text-destructive")}>
-                {networkHealth.horizonHealthy ? "Healthy" : "Degraded"}
-              </span>
+              <span className={cn(networkHealth.horizonHealthy ? "text-primary" : "text-destructive")}>{networkHealth.horizonHealthy ? "Healthy" : "Degraded"}</span>
             </div>
             <div className="flex items-center justify-between rounded-xl border border-border/40 bg-border/10 px-3 py-2 text-xs uppercase tracking-wide text-foreground/70">
               <span>Latency</span>

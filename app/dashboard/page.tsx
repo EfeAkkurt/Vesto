@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { motion, useReducedMotion } from "framer-motion";
 import { LayoutShell } from "@/src/components/layout/LayoutShell";
 import { KpiCard } from "@/src/components/cards/KpiCard";
@@ -20,7 +20,6 @@ import {
   reservePoints,
   payoutSchedule,
   networkHealth as networkHealthMock,
-  type StellarNetwork,
 } from "@/src/lib/mockData";
 import { stagger } from "@/src/components/motion/presets";
 
@@ -28,35 +27,12 @@ const DashboardPage = () => {
   const wallet = useWallet();
   const prefersReducedMotion = useReducedMotion();
   const [loading, setLoading] = useState(true);
-  const [networkHealth, setNetworkHealth] = useState(networkHealthMock);
+  const [networkHealth] = useState(networkHealthMock);
 
   useEffect(() => {
     const timer = setTimeout(() => setLoading(false), 600);
     return () => clearTimeout(timer);
   }, []);
-
-  const baseSwitchNetwork = wallet.controls.switchNetwork;
-
-  const handleSelectNetwork = useCallback(
-    (network: StellarNetwork) => {
-      setNetworkHealth((previous) => ({
-        ...previous,
-        network,
-        latencyMs: network === "TestNet" ? 184 : 210,
-        horizonHealthy: true,
-      }));
-      baseSwitchNetwork(network);
-    },
-    [baseSwitchNetwork],
-  );
-
-  const walletWithOverrides = useMemo(() => ({
-    ...wallet,
-    controls: {
-      ...wallet.controls,
-      switchNetwork: handleSelectNetwork,
-    },
-  }), [handleSelectNetwork, wallet]);
 
   const metrics = useMemo(
     () =>
@@ -68,7 +44,7 @@ const DashboardPage = () => {
   );
 
   return (
-    <LayoutShell wallet={walletWithOverrides} networkHealth={networkHealth} onSelectNetwork={handleSelectNetwork}>
+    <LayoutShell wallet={wallet} networkHealth={networkHealth}>
       <motion.div
         initial={prefersReducedMotion ? undefined : "hidden"}
         animate={prefersReducedMotion ? undefined : "visible"}
@@ -104,8 +80,7 @@ const DashboardPage = () => {
           <div className="xl:col-span-4">
             <NetworkStatusCard
               networkHealth={networkHealth}
-              wallet={walletWithOverrides}
-              onSwitchNetwork={handleSelectNetwork}
+              wallet={wallet}
             />
           </div>
           <div className="xl:col-span-8">

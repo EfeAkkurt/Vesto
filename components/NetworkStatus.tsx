@@ -1,6 +1,6 @@
 "use client";
 import { useEffect } from "react";
-import { useToast } from "@/components/ui/toast";
+import { useToast } from "@/src/components/ui/Toast";
 import { bootstrapWalletState, useWalletConnection } from "@/lib/wallet/store";
 import type { FreighterNetwork } from "@/lib/wallet/freighter";
 

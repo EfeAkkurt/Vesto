@@ -4,9 +4,6 @@ import type React from "react"
 
 import { motion, useScroll, useTransform } from "framer-motion"
 import Image from "next/image"
-import Link from "next/link"
-import ConnectButton from "@/components/ConnectButton"
-import NetworkStatus from "@/components/NetworkStatus"
 
 // Inline icons to avoid external deps
 const ArrowRight = (props: React.SVGProps<SVGSVGElement>) => (
@@ -58,56 +55,7 @@ export function HeroSection() {
         <div className="absolute inset-0 bg-gradient-to-b from-black/60 via-black/70 to-black" />
       </div>
 
-      {/* Navigation */}
-      <motion.nav
-        initial={{ y: -20, opacity: 0 }}
-        animate={{ y: 0, opacity: 1 }}
-        transition={{ duration: 0.6 }}
-        className="absolute top-0 left-0 right-0 z-20 px-6 py-6"
-      >
-        <div className="max-w-7xl mx-auto flex items-center justify-between">
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ delay: 0.2 }}
-            className="flex items-center gap-2"
-          >
-            <div className="w-8 h-8 bg-white rounded-lg flex items-center justify-center">
-              <span className="text-black font-bold text-lg">V</span>
-            </div>
-            <span className="text-2xl font-bold text-white">Vesto</span>
-          </motion.div>
-
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ delay: 0.3 }}
-            className="hidden md:flex items-center gap-8"
-          >
-            <Link href="/dashboard" className="text-sm text-white/80 hover:text-white transition-colors">
-              Dashboard
-            </Link>
-            <Link href="/tokenize" className="text-sm text-white/80 hover:text-white transition-colors">
-              Tokenize
-            </Link>
-            <Link href="/custodian" className="text-sm text-white/80 hover:text-white transition-colors">
-              Custodian
-            </Link>
-            <Link href="/proofs" className="text-sm text-white/80 hover:text-white transition-colors">
-              Proofs
-            </Link>
-            <Link href="/bridge" className="text-sm text-white/80 hover:text-white transition-colors">
-              Bridge
-            </Link>
-          </motion.div>
-
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.4 }} className="flex items-center gap-3">
-            <NetworkStatus />
-            <ConnectButton />
-          </motion.div>
-        </div>
-      </motion.nav>
-
+  
       {/* Hero Content */}
       <div className="relative z-10 max-w-7xl mx-auto px-6 py-20 text-center">
         {/* Announcement Badge */}

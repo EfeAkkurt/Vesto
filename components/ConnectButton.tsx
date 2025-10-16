@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { useToast } from "@/components/ui/toast";
+import { useToast } from "@/src/components/ui/Toast";
 import { connectFreighter, type FreighterNetwork } from "@/lib/wallet/freighter";
 import {
   bootstrapWalletState,

@@ -3,7 +3,7 @@
 import type { FC } from "react";
 import { motion, useReducedMotion } from "framer-motion";
 import type { PayoutSchedule } from "@/src/lib/mockData";
-import { formatCurrency, formatDate } from "@/src/utils/format";
+import { formatCurrency, formatDate } from "@/src/lib/utils/format";
 import { transitions, fadeScale } from "@/src/components/motion/presets";
 import { Skeleton } from "@/src/components/ui/Skeleton";
 

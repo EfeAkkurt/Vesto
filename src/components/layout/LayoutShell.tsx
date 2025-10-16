@@ -4,17 +4,16 @@ import { useState, type FC } from "react";
 import { Sidebar } from "@/src/components/layout/Sidebar";
 import { Topbar } from "@/src/components/layout/Topbar";
 import type { WalletHook } from "@/src/hooks/useWallet";
-import type { NetworkHealth, StellarNetwork } from "@/src/lib/mockData";
+import type { NetworkHealth } from "@/src/lib/mockData";
 import { cn } from "@/src/utils/cn";
 
 export type LayoutShellProps = {
   children: React.ReactNode;
   wallet: WalletHook;
   networkHealth: NetworkHealth;
-  onSelectNetwork?: (network: StellarNetwork) => void;
 };
 
-export const LayoutShell: FC<LayoutShellProps> = ({ children, wallet, networkHealth, onSelectNetwork }) => {
+export const LayoutShell: FC<LayoutShellProps> = ({ children, wallet, networkHealth }) => {
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
@@ -39,7 +38,6 @@ export const LayoutShell: FC<LayoutShellProps> = ({ children, wallet, networkHea
         collapsed={sidebarCollapsed}
         isOpen={mobileNavOpen}
         onCloseMobile={closeSidebar}
-        onSelectNetwork={onSelectNetwork ?? wallet.controls.switchNetwork}
       />
       <div
         className={cn(
@@ -49,6 +47,7 @@ export const LayoutShell: FC<LayoutShellProps> = ({ children, wallet, networkHea
         )}
       >
         <Topbar
+          networkHealth={networkHealth}
           onToggleSidebar={toggleSidebar}
           onToggleCollapse={toggleSidebarCollapse}
           isSidebarCollapsed={sidebarCollapsed}

@@ -16,7 +16,7 @@ import {
 } from "recharts";
 import type { ReservePoint } from "@/src/lib/mockData";
 import { ChartWrapper } from "@/src/components/charts/ChartWrapper";
-import { formatCurrency, formatDate } from "@/src/utils/format";
+import { formatCurrency, formatDate } from "@/src/lib/utils/format";
 
 const colors = {
   reserve: "var(--color-primary)",

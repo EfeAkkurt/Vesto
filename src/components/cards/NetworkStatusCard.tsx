@@ -2,19 +2,21 @@
 
 import type { FC } from "react";
 import { motion, useReducedMotion } from "framer-motion";
-import type { NetworkHealth, StellarNetwork } from "@/src/lib/mockData";
+import type { NetworkHealth } from "@/src/lib/mockData";
 import type { WalletHook } from "@/src/hooks/useWallet";
 import { transitions, fadeScale } from "@/src/components/motion/presets";
-import { formatCurrency, formatDateTime, shortAddress } from "@/src/utils/format";
+import { formatCurrency, formatDateTime, shortAddress } from "@/src/lib/utils/format";
 
 export type NetworkStatusCardProps = {
   networkHealth: NetworkHealth;
   wallet: WalletHook;
-  onSwitchNetwork: (network: StellarNetwork) => void;
 };
 
-export const NetworkStatusCard: FC<NetworkStatusCardProps> = ({ networkHealth, wallet, onSwitchNetwork }) => {
+export const NetworkStatusCard: FC<NetworkStatusCardProps> = ({ networkHealth, wallet }) => {
   const prefersReducedMotion = useReducedMotion();
+
+  const portfolioValue = wallet.balanceUSD != null ? formatCurrency(wallet.balanceUSD) : "—";
+  const nativeValue = wallet.balanceNative != null ? `${wallet.balanceNative} XLM` : "—";
 
   return (
     <motion.section
@@ -61,8 +63,12 @@ export const NetworkStatusCard: FC<NetworkStatusCardProps> = ({ networkHealth, w
               <span className="font-semibold text-foreground/80">{shortAddress(wallet.address)}</span>
             </div>
             <div className="flex items-center justify-between">
-              <span className="text-muted-foreground">Balance</span>
-              <span className="font-semibold text-primary">{formatCurrency(wallet.balanceUSD ?? 0)}</span>
+              <span className="text-muted-foreground">Portfolio</span>
+              <span className="font-semibold text-primary">{portfolioValue}</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-muted-foreground">Native</span>
+              <span>{nativeValue}</span>
             </div>
             <div className="flex items-center justify-between">
               <span className="text-muted-foreground">Last sign-in</span>
@@ -72,18 +78,11 @@ export const NetworkStatusCard: FC<NetworkStatusCardProps> = ({ networkHealth, w
         ) : (
           <p className="mt-2 text-muted-foreground">Connect Freighter to view wallet metrics.</p>
         )}
-        {wallet.status === "wrong-network" ? (
-          <div className="mt-3 rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-[11px] text-destructive">
-            Wallet connected to {wallet.network}. Switch to {wallet.preferredNetwork}.
+        {wallet.status === "wrong-network" && wallet.network ? (
+          <div className="mt-3 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-100">
+            Wallet connected to {wallet.network}. Switch in Freighter to align with {wallet.preferredNetwork}.
           </div>
         ) : null}
-        <button
-          type="button"
-          onClick={() => onSwitchNetwork(wallet.preferredNetwork === "TestNet" ? "Mainnet" : "TestNet")}
-          className="mt-3 w-full rounded-full border border-primary/50 bg-primary/10 px-3 py-1.5 text-xs font-semibold text-primary transition hover:border-primary/70 hover:bg-primary/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
-        >
-          Switch Network
-        </button>
       </div>
       <div className="rounded-xl border border-border/40 bg-border/10 px-4 py-3 text-xs">
         <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Permissions</p>

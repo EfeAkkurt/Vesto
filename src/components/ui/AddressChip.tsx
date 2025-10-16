@@ -1,6 +1,6 @@
 import type { FC } from "react";
 import { cn } from "@/src/utils/cn";
-import { shortAddress } from "@/src/utils/format";
+import { shortAddress } from "@/src/lib/utils/format";
 
 export type AddressChipProps = {
   address: string;
