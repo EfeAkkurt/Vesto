@@ -2,101 +2,205 @@
 
 import { useMemo } from "react";
 import useSWR, { type SWRConfiguration, type SWRResponse } from "swr";
-import { Server, type ServerApi } from "stellar-sdk";
-import { z } from "zod";
-import { HORIZON } from "@/src/utils/constants";
+import { loadStellar } from "@/src/lib/stellar/sdk";
 
 const RATE_LIMIT_DELAY_MS = 15_000;
 const DEFAULT_LIMIT = 25;
+const MAX_RETRY_COUNT = 5;
 
-const HorizonAccountBalanceSchema = z.object({
-  asset_type: z.string(),
-  asset_code: z.string().optional(),
-  asset_issuer: z.string().optional(),
-  balance: z.string(),
-});
+type HorizonThresholds = {
+  low_threshold: number;
+  med_threshold: number;
+  high_threshold: number;
+  [key: string]: unknown;
+};
 
-const HorizonAccountSchema = z.object({
-  id: z.string(),
-  account_id: z.string(),
-  sequence: z.string(),
-  last_modified_time: z.string().optional(),
-  thresholds: z.object({
-    low_threshold: z.number(),
-    med_threshold: z.number(),
-    high_threshold: z.number(),
-  }),
-  balances: z.array(HorizonAccountBalanceSchema),
-});
+type HorizonSigner = {
+  key: string;
+  type: string;
+  weight: number;
+  [key: string]: unknown;
+};
 
-const HorizonPaymentSchema = z.object({
-  id: z.string(),
-  created_at: z.string(),
-  type: z.string(),
-  amount: z.string().optional(),
-  asset_type: z.string().optional(),
-  asset_code: z.string().optional(),
-  asset_issuer: z.string().optional(),
-  transaction_hash: z.string(),
-  transaction_successful: z.boolean().optional(),
-  source_account: z.string().optional(),
-});
+export type HorizonAccountBalance = {
+  asset_type: string;
+  balance: string;
+  asset_code?: string;
+  asset_issuer?: string;
+  [key: string]: unknown;
+};
 
-const HorizonLedgerSchema = z.object({
-  id: z.string(),
-  sequence: z.number(),
-  closed_at: z.string(),
-  total_coins: z.string(),
-  operation_count: z.number(),
-  protocol_version: z.number(),
-});
+export type HorizonAccount = {
+  id: string;
+  account_id: string;
+  sequence: string;
+  last_modified_time?: string;
+  thresholds: HorizonThresholds;
+  balances: HorizonAccountBalance[];
+  signers: HorizonSigner[];
+  [key: string]: unknown;
+};
 
-const PaymentCollectionSchema = z.object({
-  _embedded: z.object({
-    records: z.array(HorizonPaymentSchema),
-  }),
-});
-
-export type HorizonAccount = z.infer<typeof HorizonAccountSchema>;
-export type HorizonAccountBalance = z.infer<typeof HorizonAccountBalanceSchema>;
-export type HorizonPayment = z.infer<typeof HorizonPaymentSchema>;
-export type HorizonEffect = ServerApi.EffectRecord;
-export type HorizonLedger = z.infer<typeof HorizonLedgerSchema>;
-
-type HorizonCollection<T> = {
-  _embedded: { records: T[] };
+export type HorizonPayment = {
+  id: string;
+  created_at: string;
+  type: string;
+  amount?: string;
+  asset_type?: string;
+  asset_code?: string;
+  asset_issuer?: string;
+  transaction_hash: string;
+  transaction_successful?: boolean;
+  source_account?: string;
+  to?: string;
+  from?: string;
+  memo?: string | null;
+  transaction_attr?: {
+    memo_type?: string;
+    memo?: string;
+    signatures?: string[];
+  };
+};
+export type HorizonEffect = {
+  id?: string;
+  type?: string;
+  transaction_hash?: string;
+  value?: string;
+  paging_token?: string;
+  [key: string]: unknown;
+};
+export type HorizonLedger = {
+  id: string;
+  sequence: number;
+  closed_at: string;
+  total_coins: string;
+  operation_count: number;
+  protocol_version: number;
+  [key: string]: unknown;
 };
 
 export type RateLimitError = Error & { status?: number; retryAfter?: number };
 
-const toUrl = (path: string) => `${HORIZON}${path}`;
-
-const fetchJson = async <T>(url: string): Promise<T> => {
-  const response = await fetch(url, {
-    headers: {
-      Accept: "application/hal+json, application/json",
-    },
-  });
-
-  if (!response.ok) {
-    const error: RateLimitError = new Error(`Horizon request failed (${response.status})`);
-    error.status = response.status;
-    if (response.status === 429) {
-      const retryAfter = Number.parseInt(response.headers.get("Retry-After") ?? "", 10);
-      error.retryAfter = Number.isFinite(retryAfter) ? retryAfter * 1000 : RATE_LIMIT_DELAY_MS;
-    }
-    throw error;
-  }
-
-  return response.json() as Promise<T>;
+type CollectionPage<T> = {
+  records: T[];
 };
 
-const withRateLimitRetry: SWRConfiguration["onErrorRetry"] = (error, key, config, revalidate, context) => {
+type PaymentCallBuilder = {
+  forAccount(accountId: string): PaymentCallBuilder;
+  order(direction: "asc" | "desc"): PaymentCallBuilder;
+  limit(limit: number): PaymentCallBuilder;
+  cursor(token: string): PaymentCallBuilder;
+  call(): Promise<CollectionPage<HorizonPayment>>;
+  stream(config: { onmessage: (record: HorizonPayment) => void; onerror?: (error: unknown) => void }): () => void;
+};
+
+type EffectCallBuilder = {
+  forAccount(accountId: string): EffectCallBuilder;
+  order(direction: "asc" | "desc"): EffectCallBuilder;
+  limit(limit: number): EffectCallBuilder;
+  call(): Promise<CollectionPage<HorizonEffect>>;
+};
+
+type LedgerCallBuilder = {
+  order(direction: "asc" | "desc"): LedgerCallBuilder;
+  limit(limit: number): LedgerCallBuilder;
+  call(): Promise<CollectionPage<HorizonLedger>>;
+};
+
+type StellarServer = {
+  loadAccount(accountId: string): Promise<HorizonAccount>;
+  fetchBaseFee(): Promise<number>;
+  payments(): PaymentCallBuilder;
+  effects(): EffectCallBuilder;
+  ledgers(): LedgerCallBuilder;
+  submitTransaction(tx: unknown): Promise<{ hash: string }>;
+};
+
+let cachedServer: StellarServer | null = null;
+
+const getServer = async (): Promise<StellarServer> => {
+  if (cachedServer) return cachedServer;
+  const horizonUrl = process.env.NEXT_PUBLIC_HORIZON_URL;
+  if (!horizonUrl) {
+    throw new Error("NEXT_PUBLIC_HORIZON_URL is not configured");
+  }
+  type StellarServerConstructor = new (serverUrl: string) => StellarServer;
+  const { Server } = (await loadStellar()) as unknown as { Server: StellarServerConstructor };
+  cachedServer = new Server(horizonUrl);
+  return cachedServer;
+};
+
+const parseRetryAfter = (value: unknown): number | undefined => {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value >= 1_000 ? value : value * 1_000;
+  }
+  if (typeof value === "string") {
+    const parsed = Number.parseInt(value, 10);
+    if (Number.isFinite(parsed)) return parsed * 1_000;
+  }
+  return undefined;
+};
+
+type SdkError = Error & {
+  response?: {
+    status?: number;
+    statusText?: string;
+    headers?: Headers | Record<string, unknown>;
+    data?: unknown;
+  };
+  status?: number;
+};
+
+const getRetryAfterFromHeaders = (headers?: Headers | Record<string, unknown>): number | undefined => {
+  if (!headers) return undefined;
+  if (headers instanceof Headers) {
+    const header = headers.get("Retry-After") ?? headers.get("retry-after");
+    return parseRetryAfter(header ?? undefined);
+  }
+  const candidate =
+    (headers["retry-after"] as unknown) ??
+    (headers["Retry-After"] as unknown) ??
+    (headers["Retry-after"] as unknown);
+  return parseRetryAfter(candidate);
+};
+
+const toRateLimitError = (error: unknown): RateLimitError => {
+  const baseMessage = "Horizon request failed";
+  if (error instanceof Error) {
+    const sdkError = error as SdkError;
+    const message = sdkError.message && sdkError.message !== "" ? sdkError.message : baseMessage;
+    const rateError: RateLimitError = sdkError;
+    rateError.message = message;
+    if (sdkError.response) {
+      const { response } = sdkError;
+      if (response.status != null) {
+        rateError.status = response.status;
+      }
+      const retryAfter = getRetryAfterFromHeaders(response.headers);
+      if (retryAfter != null) {
+        rateError.retryAfter = retryAfter;
+      }
+      const data = response.data;
+      if (data && typeof data === "object" && "title" in data && typeof data.title === "string") {
+        rateError.message = `${message}: ${data.title}`;
+      }
+    } else if (sdkError.status != null) {
+      rateError.status = sdkError.status;
+    }
+    return rateError;
+  }
+  const rateError: RateLimitError = new Error(baseMessage);
+  return rateError;
+};
+
+const withRateLimitRetry: SWRConfiguration["onErrorRetry"] = (error, _key, _config, revalidate, context) => {
   const rateError = error as RateLimitError;
   if (rateError?.status === 404) return;
-  if (context.retryCount >= 5) return;
-
-  const delay = rateError?.status === 429 ? rateError.retryAfter ?? RATE_LIMIT_DELAY_MS : Math.min(60_000, 2 ** context.retryCount * 1000);
+  if (context.retryCount >= MAX_RETRY_COUNT) return;
+  const delay =
+    rateError?.status === 429
+      ? rateError.retryAfter ?? RATE_LIMIT_DELAY_MS
+      : Math.min(60_000, 2 ** context.retryCount * 1_000);
   setTimeout(() => {
     revalidate({ retryCount: context.retryCount + 1 });
   }, delay);
@@ -111,67 +215,112 @@ const swrDefaults: SWRConfiguration = {
   onErrorRetry: withRateLimitRetry,
 };
 
-export const useAccount = (accountId?: string) => {
-  const url = accountId ? toUrl(`/accounts/${accountId}`) : null;
-  const response = useSWR<HorizonAccount, RateLimitError>(
-    url,
-    async (key) => HorizonAccountSchema.parse(await fetchJson(key)),
-    swrDefaults,
+const wrapCall = async <T>(fn: () => Promise<T>): Promise<T> => {
+  try {
+    return await fn();
+  } catch (error) {
+    throw toRateLimitError(error);
+  }
+};
+
+const fetchAccount = async ([, accountId]: [string, string]): Promise<HorizonAccount> => {
+  const server = await getServer();
+  const account = await wrapCall(() => server.loadAccount(accountId));
+  return {
+    id: account.id,
+    account_id: account.account_id,
+    sequence: account.sequence,
+    last_modified_time: account.last_modified_time,
+    thresholds: account.thresholds,
+    balances: account.balances,
+    signers: account.signers,
+  };
+};
+
+const fetchPayments = async ([, accountId, limit]: [string, string, number | undefined]): Promise<HorizonPayment[]> => {
+  const server = await getServer();
+  const page = await wrapCall(() =>
+    server.payments().forAccount(accountId).order("desc").limit(limit ?? DEFAULT_LIMIT).call(),
   );
-  return response;
+  return page.records;
 };
 
-export const useAccountPayments = (accountId?: string, limit = DEFAULT_LIMIT) => {
-  const url = accountId
-    ? toUrl(`/payments?for_account=${encodeURIComponent(accountId)}&order=desc&limit=${limit}`)
-    : null;
-  const response = useSWR<HorizonPayment[], RateLimitError>(
-    url,
-    async (key) => {
-      const raw = await fetchJson(key);
-      const parsed = PaymentCollectionSchema.parse(raw);
-      return parsed._embedded.records;
-    },
-    swrDefaults,
+const fetchEffects = async ([, accountId, limit]: [string, string, number | undefined]): Promise<HorizonEffect[]> => {
+  const server = await getServer();
+  const page = await wrapCall(() =>
+    server.effects().forAccount(accountId).order("desc").limit(limit ?? DEFAULT_LIMIT).call(),
   );
-  return response;
+  return page.records;
 };
 
-export const useAccountEffects = (accountId?: string, limit = DEFAULT_LIMIT) => {
-  const url = accountId
-    ? toUrl(`/effects?for_account=${encodeURIComponent(accountId)}&order=desc&limit=${limit}`)
-    : null;
-  const response = useSWR<HorizonCollection<HorizonEffect>>(url, fetchJson, swrDefaults);
-  const effects = useMemo(() => response.data?._embedded.records ?? [], [response.data]);
-  return { ...response, data: effects } as SWRResponse<HorizonEffect[], RateLimitError>;
+const fetchLatestLedger = async (): Promise<HorizonLedger> => {
+  const server = await getServer();
+  const page = await wrapCall(() => server.ledgers().order("desc").limit(1).call());
+  if (!page.records.length) {
+    throw new Error("No ledger records returned");
+  }
+  return page.records[0];
 };
 
-export const useLedgersLatest = () => {
-  const response = useSWR<HorizonLedger, RateLimitError>(
-    toUrl(`/ledgers/latest`),
-    async (key) => HorizonLedgerSchema.parse(await fetchJson(key)),
+export const useAccount = (accountId?: string) =>
+  useSWR<HorizonAccount, RateLimitError>(accountId ? ["account", accountId] : null, fetchAccount, {
+    ...swrDefaults,
+    refreshInterval: 15_000,
+  });
+
+export const useAccountPayments = (accountId?: string, limit = DEFAULT_LIMIT) =>
+  useSWR<HorizonPayment[], RateLimitError>(
+    accountId ? ["payments", accountId, limit] : null,
+    fetchPayments,
     {
       ...swrDefaults,
-      refreshInterval: 15_000,
+      refreshInterval: 20_000,
     },
   );
-  return response;
+
+export const useAccountEffects = (accountId?: string, limit = DEFAULT_LIMIT) => {
+  const response = useSWR<HorizonEffect[], RateLimitError>(
+    accountId ? ["effects", accountId, limit] : null,
+    fetchEffects,
+    {
+      ...swrDefaults,
+      refreshInterval: 30_000,
+    },
+  );
+  const effects = useMemo(() => response.data ?? [], [response.data]);
+  return {
+    ...response,
+    data: effects,
+  } as SWRResponse<HorizonEffect[], RateLimitError>;
 };
 
-export const streamPayments = (
+export const useLedgersLatest = () =>
+  useSWR<HorizonLedger, RateLimitError>(["ledger", "latest"], fetchLatestLedger, {
+    ...swrDefaults,
+    refreshInterval: 15_000,
+  });
+
+export const streamPayments = async (
   accountId: string,
-  onMessage: (payment: HorizonPayment) => void,
-): (() => void) => {
-  const server = new Server(HORIZON, { allowHttp: HORIZON.startsWith("http://") });
+  onMessage: (record: HorizonPayment) => void,
+  onError?: (error: RateLimitError) => void,
+): Promise<() => void> => {
+  const server = await getServer();
   const close = server
     .payments()
     .forAccount(accountId)
     .cursor("now")
     .stream({
-      onmessage: (message) => {
-        onMessage(message);
+      onmessage: (record) => {
+        onMessage(record as HorizonPayment);
       },
-      reconnectTimeout: RATE_LIMIT_DELAY_MS,
+      onerror: (error) => {
+        if (onError) {
+          onError(toRateLimitError(error));
+        }
+      },
     });
-  return () => close();
+  return () => {
+    close();
+  };
 };

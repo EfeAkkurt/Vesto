@@ -3,7 +3,7 @@
 import type { FC } from "react";
 import { motion, useReducedMotion } from "framer-motion";
 import type { NetworkHealth } from "@/src/hooks/useNetworkHealth";
-import type { HorizonAccount } from "@/src/hooks/horizon";
+import type { HorizonAccount, HorizonAccountBalance } from "@/src/hooks/horizon";
 import type { WalletHook } from "@/src/hooks/useWallet";
 import { transitions, fadeScale } from "@/src/components/motion/presets";
 import { formatCurrency, formatDateTime, shortAddress } from "@/src/lib/utils/format";
@@ -34,8 +34,13 @@ export const NetworkStatusCard: FC<NetworkStatusCardProps> = ({ networkHealth, w
   const ledgerClosedAt = networkHealth.ledger?.closed_at ? formatDateTime(networkHealth.ledger.closed_at) : "—";
   const ledgerOps = networkHealth.ledger?.operation_count;
 
-  const nativeBalance = account?.balances.find((balance) => balance.asset_type === "native");
-  const trustlines = account?.balances.filter((balance) => balance.asset_type !== "native").length ?? 0;
+  const nativeBalance = account?.balances.find(
+    (balance: HorizonAccountBalance) => balance.asset_type === "native",
+  );
+  const trustlines =
+    account?.balances.filter(
+      (balance: HorizonAccountBalance) => balance.asset_type !== "native",
+    ).length ?? 0;
   const nativeValue = nativeBalance ? `${Number.parseFloat(nativeBalance.balance).toFixed(4)} XLM` : "—";
   const portfolioValue = wallet.balanceUSD != null ? formatCurrency(wallet.balanceUSD) : "—";
 

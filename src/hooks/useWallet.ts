@@ -8,7 +8,19 @@ import {
   setWalletConnection,
   useWalletConnection,
 } from "@/lib/wallet/store";
-import type { WalletState, StellarNetwork } from "@/src/lib/mockData";
+
+export type StellarNetwork = "TestNet" | "Mainnet";
+
+export type WalletState = {
+  status: "disconnected" | "connecting" | "wrong-network" | "connected";
+  address?: string;
+  network?: StellarNetwork;
+  balanceUSD?: number;
+  balanceNative?: number;
+  permissions?: string[];
+  lastSignIn?: string;
+  preferredNetwork: StellarNetwork;
+};
 
 export type WalletControls = {
   connect: () => Promise<void> | void;

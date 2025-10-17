@@ -4,7 +4,6 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Buffer } from "buffer";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
-import { Keypair } from "stellar-sdk";
 import { decode } from "cborg";
 import { CopyHash } from "@/src/components/ui/CopyHash";
 import type { Attestation } from "@/src/lib/types/proofs";
@@ -12,6 +11,7 @@ import { formatUSD, formatDateTime } from "@/src/lib/utils/format";
 import { getViaGateway } from "@/src/lib/ipfs/client";
 import { canonicalizeToCbor, verifyEd25519, type AttestationMsg } from "@/src/lib/custodian/attestation";
 import { AttestationMetadataSchema, type AttestationMetadata } from "@/src/lib/custodian/schema";
+import { rawPublicKeyFromAddress } from "@/src/lib/stellar/keys";
 
 export type AttestationDrawerProps = {
   open: boolean;
@@ -27,8 +27,6 @@ const statusBadge: Record<Attestation["status"], string> = {
 };
 
 type VerificationState = "idle" | "loading" | "verified" | "invalid" | "error";
-
-const toUint8Array = (buffer: Buffer) => new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength);
 
 export const AttestationDrawer = ({ open, onClose, item, onStatusUpdate }: AttestationDrawerProps) => {
   const prefersReducedMotion = useReducedMotion();
@@ -109,7 +107,7 @@ export const AttestationDrawer = ({ open, onClose, item, onStatusUpdate }: Attes
         };
         const messageBytes = canonicalizeToCbor(message);
         const signatureBytes = new Uint8Array(Buffer.from(item.signature, "base64"));
-        const publicKeyRaw = toUint8Array(Keypair.fromPublicKey(item.signedBy).rawPublicKey());
+        const publicKeyRaw = rawPublicKeyFromAddress(item.signedBy);
         const verified = await verifyEd25519(publicKeyRaw, messageBytes, signatureBytes);
         if (!cancelled) {
           const nextStatus: VerificationState = verified ? "verified" : "invalid";

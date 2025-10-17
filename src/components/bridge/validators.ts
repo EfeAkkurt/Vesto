@@ -1,5 +1,5 @@
 import { keccak_256 } from "@noble/hashes/sha3";
-import { StrKey } from "stellar-sdk";
+import { decodeEd25519PublicKey } from "@/src/lib/stellar/strkey";
 
 const toHex = (bytes: Uint8Array) => Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
 
@@ -29,4 +29,11 @@ export const isValidEth = (addr: string): boolean => {
   return true;
 };
 
-export const isValidStellar = (addr: string): boolean => StrKey.isValidEd25519PublicKey(addr.trim());
+export const isValidStellar = (addr: string): boolean => {
+  try {
+    decodeEd25519PublicKey(addr.trim());
+    return true;
+  } catch {
+    return false;
+  }
+};

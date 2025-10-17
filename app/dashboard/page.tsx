@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo } from "react";
 import { motion, useReducedMotion } from "framer-motion";
 import { LayoutShell } from "@/src/components/layout/LayoutShell";
 import { KpiCard } from "@/src/components/cards/KpiCard";
@@ -11,48 +11,76 @@ import { TransactionsTable } from "@/src/components/tables/TransactionsTable";
 import { UpcomingPayoutCard } from "@/src/components/cards/UpcomingPayoutCard";
 import { NetworkStatusCard } from "@/src/components/cards/NetworkStatusCard";
 import { useWallet } from "@/src/hooks/useWallet";
-import { useAccount, useAccountPayments } from "@/src/hooks/horizon";
+import { useAccount, useAccountEffects, useAccountPayments } from "@/src/hooks/horizon";
+import { useAttestations } from "@/src/hooks/useAttestations";
 import { useNetworkHealth } from "@/src/hooks/useNetworkHealth";
 import {
-  kpi,
-  kpiMetrics,
-  holdings,
-  attestations,
-  reservePoints,
-  payoutSchedule,
-} from "@/src/lib/mockData";
+  buildMetrics,
+  buildPayoutSchedule,
+  buildReservePoints,
+  deriveHoldings,
+  deriveKpi,
+} from "@/src/lib/dashboard/transformers";
 import { stagger } from "@/src/components/motion/presets";
 
 const DashboardPage = () => {
   const wallet = useWallet();
   const networkHealth = useNetworkHealth();
   const prefersReducedMotion = useReducedMotion();
-  const [loading, setLoading] = useState(true);
+  const accountId = wallet.accountId;
 
-  const accountId = wallet.address;
-  const { data: account } = useAccount(accountId);
   const {
-    data: payments = [],
+    data: account,
+    isLoading: accountLoading,
+  } = useAccount(accountId);
+
+  const {
+    data: payments,
     isLoading: paymentsLoading,
     error: paymentsError,
   } = useAccountPayments(accountId);
 
-  useEffect(() => {
-    const timer = setTimeout(() => setLoading(false), 600);
-    return () => clearTimeout(timer);
-  }, []);
+  const {
+    data: effects,
+    isLoading: effectsLoading,
+  } = useAccountEffects(accountId);
 
-  const metrics = useMemo(
-    () =>
-      kpiMetrics.map((metric) => ({
-        ...metric,
-        value: kpi[metric.key],
-      })),
-    [],
+  const attestationState = useAttestations(accountId, payments, effects);
+
+  const holdingsData = useMemo(
+    () => (wallet.connected && account ? deriveHoldings(account) : []),
+    [wallet.connected, account],
   );
 
+  const kpi = useMemo(() => deriveKpi(wallet.connected ? account : undefined), [wallet.connected, account]);
+  const metrics = useMemo(() => buildMetrics(kpi), [kpi]);
+
+  const reservePointsData = useMemo(
+    () => buildReservePoints(attestationState.data),
+    [attestationState.data],
+  );
+
+  const payoutScheduleData = useMemo(
+    () => buildPayoutSchedule(attestationState.data),
+    [attestationState.data],
+  );
+
+  const effectiveWallet = useMemo(
+    () => ({
+      ...wallet,
+      balanceUSD: wallet.connected && account ? kpi.portfolioUSD : wallet.balanceUSD,
+    }),
+    [wallet, account, kpi.portfolioUSD],
+  );
+
+  const isWalletIdle = !wallet.connected;
+  const isPaymentsLoading = isWalletIdle || paymentsLoading;
+  const isAccountLoading = isWalletIdle || accountLoading;
+  const isAttestationLoading =
+    isWalletIdle || attestationState.isLoading || effectsLoading || paymentsLoading;
+
   return (
-    <LayoutShell wallet={wallet} networkHealth={networkHealth}>
+    <LayoutShell wallet={effectiveWallet} networkHealth={networkHealth}>
       <motion.div
         initial={prefersReducedMotion ? undefined : "hidden"}
         animate={prefersReducedMotion ? undefined : "visible"}
@@ -70,33 +98,37 @@ const DashboardPage = () => {
               precision={metric.precision}
               delta={metric.delta}
               trend={metric.trend}
-              isLoading={loading}
+              isLoading={isAccountLoading}
               updatedAt={kpi.updatedAt}
             />
           ))}
         </section>
         <section className="grid gap-6 xl:grid-cols-12">
           <div className="xl:col-span-6">
-            <PortfolioBars data={holdings} isLoading={loading} />
+            <PortfolioBars data={holdingsData} isLoading={isAccountLoading} />
           </div>
           <div className="xl:col-span-6">
-            <DonutAttestations attestations={attestations} isLoading={loading} />
+            <DonutAttestations attestations={attestationState.data} isLoading={isAttestationLoading} />
           </div>
           <div className="xl:col-span-8">
-            <ReserveProjection data={reservePoints} isLoading={loading} />
+            <ReserveProjection data={reservePointsData} isLoading={isAttestationLoading} />
           </div>
           <div className="xl:col-span-4">
             <NetworkStatusCard
               networkHealth={networkHealth}
-              wallet={wallet}
+              wallet={effectiveWallet}
               account={account}
             />
           </div>
           <div className="xl:col-span-8">
-            <TransactionsTable payments={payments} isLoading={paymentsLoading} error={paymentsError ?? null} />
+            <TransactionsTable
+              payments={payments ?? []}
+              isLoading={isPaymentsLoading}
+              error={paymentsError ?? null}
+            />
           </div>
           <div className="xl:col-span-4">
-            <UpcomingPayoutCard schedule={payoutSchedule} isLoading={loading} />
+            <UpcomingPayoutCard schedule={payoutScheduleData} isLoading={isAttestationLoading} />
           </div>
         </section>
       </motion.div>

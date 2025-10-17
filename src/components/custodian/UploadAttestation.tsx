@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import { Buffer } from "buffer";
-import { Keypair, Networks } from "stellar-sdk";
 import { useToast } from "@/src/components/ui/Toast";
 import { Loader } from "@/src/components/ui/Loader";
 import type { Attestation } from "@/src/lib/types/proofs";
@@ -10,6 +9,7 @@ import { uploadFile, putDagCbor, getViaGateway } from "@/src/lib/ipfs/client";
 import { HORIZON, STELLAR_NET } from "@/src/utils/constants";
 import { canonicalizeToCbor, signEd25519, buildAndSubmitMemoTx, type AttestationMsg } from "@/src/lib/custodian/attestation";
 import { AttestationMetadataSchema } from "@/src/lib/custodian/schema";
+import { deriveKeypairFromSecret } from "@/src/lib/stellar/keys";
 
 export type UploadAttestationProps = {
   wallet: string;
@@ -21,9 +21,13 @@ type FormErrors = Partial<Record<"reserveUSD" | "file" | "secret", string>>;
 
 type SubmissionStage = "idle" | "uploading" | "signing" | "submitting";
 
-const getNetworkPassphrase = () => (STELLAR_NET?.toUpperCase() === "MAINNET" ? Networks.PUBLIC : Networks.TESTNET);
+const NETWORK_PASSPHRASES = {
+  MAINNET: "Public Global Stellar Network ; September 2015",
+  TESTNET: "Test SDF Network ; September 2015",
+} as const;
 
-const toUint8Array = (buffer: Buffer) => new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength);
+const getNetworkPassphrase = () =>
+  STELLAR_NET?.toUpperCase() === "MAINNET" ? NETWORK_PASSPHRASES.MAINNET : NETWORK_PASSPHRASES.TESTNET;
 
 const generateNonce = () => {
   const source = globalThis.crypto?.getRandomValues(new Uint8Array(16));
@@ -77,7 +81,7 @@ export const UploadAttestation = ({ wallet, nextWeek, onUploaded }: UploadAttest
     setIsSubmitting(true);
     setStage("uploading");
     try {
-      const keypair = Keypair.fromSecret(secret.trim());
+      const derived = deriveKeypairFromSecret(secret.trim());
       const timestamp = new Date().toISOString();
       const nonce = generateNonce();
 
@@ -104,13 +108,13 @@ export const UploadAttestation = ({ wallet, nextWeek, onUploaded }: UploadAttest
         nonce,
       };
       const messageBytes = canonicalizeToCbor(message);
-      const signatureBytes = await signEd25519(toUint8Array(keypair.rawSecretKey()), messageBytes);
+      const signatureBytes = await signEd25519(derived.secretKeyRaw, messageBytes);
       const signature = Buffer.from(signatureBytes).toString("base64");
 
       setStage("submitting");
-      const txHash = await buildAndSubmitMemoTx({
+      const { txHash } = await buildAndSubmitMemoTx({
         secret: secret.trim(),
-        memoTextCID: metadataCid,
+        memoCid: metadataCid,
         serverUrl: HORIZON,
         networkPassphrase: getNetworkPassphrase(),
       });
@@ -125,7 +129,7 @@ export const UploadAttestation = ({ wallet, nextWeek, onUploaded }: UploadAttest
           mime: file.type || "application/octet-stream",
         },
         metadataCid,
-        signedBy: keypair.publicKey(),
+        signedBy: derived.publicKey,
         signature,
         signatureType: "ed25519",
         nonce,

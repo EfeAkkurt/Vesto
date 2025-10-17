@@ -16,15 +16,13 @@ import { SubmissionModal } from "@/src/components/custodian/SubmissionModal";
 import type { AssetType, Attestation } from "@/src/lib/types/proofs";
 import { formatUSD, formatDate } from "@/src/lib/utils/format";
 import { canonicalizeToCbor, verifyEd25519 } from "@/src/lib/custodian/attestation";
-import { Keypair } from "stellar-sdk";
+import { rawPublicKeyFromAddress } from "@/src/lib/stellar/keys";
 
 const statusBadge: Record<"pending" | "approved" | "rejected", string> = {
   pending: "bg-amber-400/15 text-amber-200",
   approved: "bg-primary/15 text-primary",
   rejected: "bg-rose-400/15 text-rose-300",
 };
-
-const toUint8Array = (buffer: Buffer) => new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength);
 
 type RequestStatus = "pending" | "approved" | "rejected";
 
@@ -241,7 +239,7 @@ export default function CustodianPage() {
         nonce: attestation.nonce,
       });
       const signatureBytes = new Uint8Array(Buffer.from(attestation.signature, "base64"));
-      const publicKeyRaw = toUint8Array(Keypair.fromPublicKey(attestation.signedBy).rawPublicKey());
+      const publicKeyRaw = rawPublicKeyFromAddress(attestation.signedBy);
       const verified = await verifyEd25519(publicKeyRaw, messageBytes, signatureBytes);
       if (verified) {
         handleAttestationStatusUpdate(attestation.metadataCid, "Verified");
