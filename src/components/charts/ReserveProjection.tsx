@@ -14,7 +14,7 @@ import {
   ReferenceArea,
   type TooltipProps,
 } from "recharts";
-import type { ReservePoint } from "@/src/lib/mockData";
+import type { ReservePoint } from "@/src/lib/dashboard/types";
 import { ChartWrapper } from "@/src/components/charts/ChartWrapper";
 import { formatCurrency, formatDate } from "@/src/lib/utils/format";
 

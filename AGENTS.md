@@ -43,3 +43,7 @@ npm run lint && npm run build
 - When creating new UI, colocate components near their route folder or in `app/components/` if shared.
 - Always run `npm run lint` before finishing a change, and attempt `npm run build` to verify type safety.
 - Document sandbox limitations (e.g., `npm run dev` restrictions) in the final handoff.
+- Default to using `rg` for repository searches and always supply the `workdir` when running shell commands.
+- Skip the planning tool for straightforward tasks and never produce single-step plans when planning is needed.
+- Before any implementation work, read every markdown file under `/docs` so Horizon/IPFS flows stay aligned with canonical guidance.
+- Replace mock data with live Horizon sources whenever the dashboard is in scope; keep fallbacks graceful when accounts are disconnected or Horizon is unavailable.

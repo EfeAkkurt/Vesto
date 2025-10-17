@@ -12,7 +12,7 @@ import {
   Legend,
   type TooltipProps,
 } from "recharts";
-import type { Holding } from "@/src/lib/mockData";
+import type { HoldingDatum } from "@/src/lib/dashboard/types";
 import { ChartWrapper } from "@/src/components/charts/ChartWrapper";
 import { formatCurrency } from "@/src/lib/utils/format";
 
@@ -22,7 +22,7 @@ const colors = {
 };
 
 type PortfolioBarsProps = {
-  data: Holding[];
+  data: HoldingDatum[];
   isLoading?: boolean;
 };
 
@@ -34,7 +34,7 @@ type StackedDatum = {
   changePct: number;
 };
 
-const prepareData = (holdings: Holding[]): StackedDatum[] => {
+const prepareData = (holdings: HoldingDatum[]): StackedDatum[] => {
   const map = new Map<string, StackedDatum>();
   holdings.forEach((holding) => {
     const key = holding.category;

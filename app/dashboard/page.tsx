@@ -11,23 +11,31 @@ import { TransactionsTable } from "@/src/components/tables/TransactionsTable";
 import { UpcomingPayoutCard } from "@/src/components/cards/UpcomingPayoutCard";
 import { NetworkStatusCard } from "@/src/components/cards/NetworkStatusCard";
 import { useWallet } from "@/src/hooks/useWallet";
+import { useAccount, useAccountPayments } from "@/src/hooks/horizon";
+import { useNetworkHealth } from "@/src/hooks/useNetworkHealth";
 import {
   kpi,
   kpiMetrics,
   holdings,
   attestations,
-  transactions,
   reservePoints,
   payoutSchedule,
-  networkHealth as networkHealthMock,
 } from "@/src/lib/mockData";
 import { stagger } from "@/src/components/motion/presets";
 
 const DashboardPage = () => {
   const wallet = useWallet();
+  const networkHealth = useNetworkHealth();
   const prefersReducedMotion = useReducedMotion();
   const [loading, setLoading] = useState(true);
-  const [networkHealth] = useState(networkHealthMock);
+
+  const accountId = wallet.address;
+  const { data: account } = useAccount(accountId);
+  const {
+    data: payments = [],
+    isLoading: paymentsLoading,
+    error: paymentsError,
+  } = useAccountPayments(accountId);
 
   useEffect(() => {
     const timer = setTimeout(() => setLoading(false), 600);
@@ -81,10 +89,11 @@ const DashboardPage = () => {
             <NetworkStatusCard
               networkHealth={networkHealth}
               wallet={wallet}
+              account={account}
             />
           </div>
           <div className="xl:col-span-8">
-            <TransactionsTable transactions={transactions} isLoading={loading} />
+            <TransactionsTable payments={payments} isLoading={paymentsLoading} error={paymentsError ?? null} />
           </div>
           <div className="xl:col-span-4">
             <UpcomingPayoutCard schedule={payoutSchedule} isLoading={loading} />

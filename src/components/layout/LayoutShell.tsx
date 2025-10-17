@@ -4,7 +4,7 @@ import { useState, type FC } from "react";
 import { Sidebar } from "@/src/components/layout/Sidebar";
 import { Topbar } from "@/src/components/layout/Topbar";
 import type { WalletHook } from "@/src/hooks/useWallet";
-import type { NetworkHealth } from "@/src/lib/mockData";
+import type { NetworkHealth } from "@/src/hooks/useNetworkHealth";
 import { cn } from "@/src/utils/cn";
 
 export type LayoutShellProps = {

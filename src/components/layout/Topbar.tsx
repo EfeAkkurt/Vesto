@@ -2,12 +2,25 @@
 
 import ConnectWalletButton from "@/components/ConnectWalletButton";
 import NetworkStatus from "@/components/NetworkStatus";
-import type { NetworkHealth } from "@/src/lib/mockData";
+import type { NetworkHealth } from "@/src/hooks/useNetworkHealth";
 import { cn } from "@/src/utils/cn";
 
 const healthLabel = (healthy: boolean) => (healthy ? "Healthy" : "Degraded");
 
 const healthTone = (healthy: boolean) => (healthy ? "text-primary" : "text-destructive");
+
+const formatLatency = (latencyMs: number) => {
+  if (!Number.isFinite(latencyMs) || latencyMs <= 0) return "<1s";
+  if (latencyMs < 1_000) {
+    return `${Math.round(latencyMs)}ms`;
+  }
+  const seconds = latencyMs / 1_000;
+  if (seconds < 60) {
+    return `${seconds.toFixed(seconds < 10 ? 1 : 0)}s`;
+  }
+  const minutes = seconds / 60;
+  return `${minutes.toFixed(minutes < 10 ? 1 : 0)}m`;
+};
 
 type TopbarProps = {
   networkHealth: NetworkHealth;
@@ -59,8 +72,12 @@ export const Topbar = ({
           <span>Search (soon)</span>
         </div>
         <div className="hidden items-center gap-3 md:flex">
-          <span className={cn("rounded-full border px-3 py-1 text-xs font-semibold uppercase tracking-wide text-foreground/80", "border-border/40 bg-card/40")}
-            title={`Latency ${networkHealth.latencyMs}ms`}
+          <span
+            className={cn(
+              "rounded-full border px-3 py-1 text-xs font-semibold uppercase tracking-wide text-foreground/80",
+              "border-border/40 bg-card/40",
+            )}
+            title={`Ledger lag ${formatLatency(networkHealth.latencyMs)}`}
           >
             Horizon · <span className={cn("ml-1", healthTone(networkHealth.horizonHealthy))}>{healthLabel(networkHealth.horizonHealthy)}</span>
           </span>

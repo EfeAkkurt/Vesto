@@ -5,6 +5,10 @@ export type NavItem = {
   icon: "dashboard" | "tokenize" | "custodian" | "proofs" | "bridge";
 };
 
+export const HORIZON = process.env.NEXT_PUBLIC_HORIZON_URL!;
+export const STELLAR_NET = process.env.NEXT_PUBLIC_STELLAR_NETWORK!;
+export const IPFS_ENDPOINT = process.env.NEXT_PUBLIC_IPFS_ENDPOINT!;
+
 export const SIDEBAR_NAV: NavItem[] = [
   { key: "dashboard", label: "Dashboard", href: "/dashboard", icon: "dashboard" },
   { key: "tokenize", label: "Tokenize", href: "/tokenize", icon: "tokenize" },

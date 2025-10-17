@@ -20,6 +20,10 @@ export type WalletHook = WalletState & {
   controls: WalletControls;
   isLoading: boolean;
   error?: string;
+  connected: boolean;
+  accountId?: string;
+  connect: WalletControls["connect"];
+  disconnect: WalletControls["disconnect"];
 };
 
 const DEFAULT_NETWORK: StellarNetwork = "TestNet";
@@ -120,10 +124,14 @@ export const useWallet = (): WalletHook => {
   }, [address, preferredNetwork]);
 
   const mappedNetwork = freighterToStellar(network) ?? (address ? preferredNetwork : undefined);
+  const connected = status === "connected" && !!address && (!mappedNetwork || mappedNetwork === preferredNetwork);
+  const accountId = connected && address ? address : undefined;
 
   return useMemo<WalletHook>(() => ({
     status,
     address: address ?? undefined,
+    accountId,
+    connected,
     network: mappedNetwork,
     balanceUSD: undefined,
     balanceNative: undefined,
@@ -135,7 +143,21 @@ export const useWallet = (): WalletHook => {
       disconnect,
       switchNetwork,
     },
+    connect,
+    disconnect,
     isLoading,
     error,
-  }), [status, address, mappedNetwork, preferredNetwork, connect, disconnect, switchNetwork, isLoading, error]);
+  }), [
+    status,
+    address,
+    accountId,
+    connected,
+    mappedNetwork,
+    preferredNetwork,
+    connect,
+    disconnect,
+    switchNetwork,
+    isLoading,
+    error,
+  ]);
 };

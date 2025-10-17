@@ -1,3 +1,32 @@
-export const isValidEth = (addr: string): boolean => /^0x[a-fA-F0-9]{40}$/.test(addr.trim());
+import { keccak_256 } from "@noble/hashes/sha3";
+import { StrKey } from "stellar-sdk";
 
-export const isValidStellar = (addr: string): boolean => /^G[A-Z2-7]{55}$/.test(addr.trim());
+const toHex = (bytes: Uint8Array) => Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+
+export const isValidEth = (addr: string): boolean => {
+  const normalized = addr.trim();
+  if (!/^0x[a-fA-F0-9]{40}$/.test(normalized)) {
+    return false;
+  }
+
+  const hex = normalized.slice(2);
+  const isAllLower = hex === hex.toLowerCase();
+  const isAllUpper = hex === hex.toUpperCase();
+  if (isAllLower || isAllUpper) {
+    return true;
+  }
+
+  const hash = toHex(keccak_256(new TextEncoder().encode(hex.toLowerCase())));
+  for (let index = 0; index < hex.length; index += 1) {
+    const char = hex[index];
+    if (/[a-fA-F]/.test(char)) {
+      const nibble = parseInt(hash[index], 16);
+      if ((nibble >= 8 && char !== char.toUpperCase()) || (nibble < 8 && char !== char.toLowerCase())) {
+        return false;
+      }
+    }
+  }
+  return true;
+};
+
+export const isValidStellar = (addr: string): boolean => StrKey.isValidEd25519PublicKey(addr.trim());

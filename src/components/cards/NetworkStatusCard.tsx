@@ -2,21 +2,42 @@
 
 import type { FC } from "react";
 import { motion, useReducedMotion } from "framer-motion";
-import type { NetworkHealth } from "@/src/lib/mockData";
+import type { NetworkHealth } from "@/src/hooks/useNetworkHealth";
+import type { HorizonAccount } from "@/src/hooks/horizon";
 import type { WalletHook } from "@/src/hooks/useWallet";
 import { transitions, fadeScale } from "@/src/components/motion/presets";
 import { formatCurrency, formatDateTime, shortAddress } from "@/src/lib/utils/format";
 
+const formatLatency = (latencyMs: number) => {
+  if (!Number.isFinite(latencyMs) || latencyMs <= 0) return "<1s";
+  if (latencyMs < 1_000) {
+    return `${Math.round(latencyMs)}ms`;
+  }
+  const seconds = latencyMs / 1_000;
+  if (seconds < 60) {
+    return `${seconds.toFixed(seconds < 10 ? 1 : 0)}s`;
+  }
+  const minutes = seconds / 60;
+  return `${minutes.toFixed(minutes < 10 ? 1 : 0)}m`;
+};
+
 export type NetworkStatusCardProps = {
   networkHealth: NetworkHealth;
   wallet: WalletHook;
+  account?: HorizonAccount;
 };
 
-export const NetworkStatusCard: FC<NetworkStatusCardProps> = ({ networkHealth, wallet }) => {
+export const NetworkStatusCard: FC<NetworkStatusCardProps> = ({ networkHealth, wallet, account }) => {
   const prefersReducedMotion = useReducedMotion();
 
+  const ledgerSequence = networkHealth.ledger?.sequence;
+  const ledgerClosedAt = networkHealth.ledger?.closed_at ? formatDateTime(networkHealth.ledger.closed_at) : "—";
+  const ledgerOps = networkHealth.ledger?.operation_count;
+
+  const nativeBalance = account?.balances.find((balance) => balance.asset_type === "native");
+  const trustlines = account?.balances.filter((balance) => balance.asset_type !== "native").length ?? 0;
+  const nativeValue = nativeBalance ? `${Number.parseFloat(nativeBalance.balance).toFixed(4)} XLM` : "—";
   const portfolioValue = wallet.balanceUSD != null ? formatCurrency(wallet.balanceUSD) : "—";
-  const nativeValue = wallet.balanceNative != null ? `${wallet.balanceNative} XLM` : "—";
 
   return (
     <motion.section
@@ -28,16 +49,21 @@ export const NetworkStatusCard: FC<NetworkStatusCardProps> = ({ networkHealth, w
     >
       <header>
         <h2 className="text-sm font-semibold text-foreground/90">Network & Status</h2>
-        <p className="text-xs text-muted-foreground">Stellar Horizon health & wallet permissions</p>
+        <p className="text-xs text-muted-foreground">Stellar Horizon health & wallet telemetry</p>
       </header>
+      <div className="inline-flex items-center gap-2 self-start rounded-full border border-border/40 bg-border/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+        <span>{networkHealth.network}</span>
+        <span className="size-1 rounded-full bg-primary" aria-hidden />
+        <span>{formatLatency(networkHealth.latencyMs)}</span>
+      </div>
       <div className="rounded-xl border border-border/40 bg-border/10 px-4 py-3 text-xs">
         <div className="flex items-center justify-between">
           <span className="text-muted-foreground">Active Network</span>
           <span className="font-semibold text-primary">{networkHealth.network}</span>
         </div>
         <div className="mt-2 flex items-center justify-between">
-          <span className="text-muted-foreground">Latency</span>
-          <span>{networkHealth.latencyMs}ms</span>
+          <span className="text-muted-foreground">Ledger lag</span>
+          <span>{networkHealth.isLoading ? "—" : formatLatency(networkHealth.latencyMs)}</span>
         </div>
         <div className="mt-2 flex items-center justify-between">
           <span className="text-muted-foreground">Horizon health</span>
@@ -45,9 +71,20 @@ export const NetworkStatusCard: FC<NetworkStatusCardProps> = ({ networkHealth, w
             {networkHealth.horizonHealthy ? "Healthy" : "Degraded"}
           </span>
         </div>
-        <p className="mt-2 text-[11px] text-muted-foreground">
-          Last check {formatDateTime(networkHealth.lastHorizonCheck)}
-        </p>
+        <div className="mt-3 grid gap-2">
+          <div className="flex items-center justify-between">
+            <span className="text-muted-foreground">Ledger #</span>
+            <span className="font-semibold text-foreground/90">{ledgerSequence ?? "—"}</span>
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="text-muted-foreground">Operations</span>
+            <span>{ledgerOps ?? "—"}</span>
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="text-muted-foreground">Closed</span>
+            <span>{ledgerClosedAt}</span>
+          </div>
+        </div>
       </div>
       <div className="rounded-xl border border-border/40 bg-card/60 px-4 py-3 text-xs">
         <div className="flex items-center justify-between gap-2">
@@ -69,6 +106,10 @@ export const NetworkStatusCard: FC<NetworkStatusCardProps> = ({ networkHealth, w
             <div className="flex items-center justify-between">
               <span className="text-muted-foreground">Native</span>
               <span>{nativeValue}</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-muted-foreground">Trustlines</span>
+              <span>{trustlines}</span>
             </div>
             <div className="flex items-center justify-between">
               <span className="text-muted-foreground">Last sign-in</span>

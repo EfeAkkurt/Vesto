@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Buffer } from "buffer";
 import { motion, useReducedMotion } from "framer-motion";
 import { transitions, fadeInUp } from "@/src/components/motion/presets";
 import { LayoutShell } from "@/src/components/layout/LayoutShell";
@@ -11,14 +12,19 @@ import { CustodianInfo } from "@/src/components/custodian/CustodianInfo";
 import { UploadAttestation } from "@/src/components/custodian/UploadAttestation";
 import { AttestationTimeline } from "@/src/components/custodian/AttestationTimeline";
 import { AttestationDrawer } from "@/src/components/custodian/AttestationDrawer";
+import { SubmissionModal } from "@/src/components/custodian/SubmissionModal";
 import type { AssetType, Attestation } from "@/src/lib/types/proofs";
 import { formatUSD, formatDate } from "@/src/lib/utils/format";
+import { canonicalizeToCbor, verifyEd25519 } from "@/src/lib/custodian/attestation";
+import { Keypair } from "stellar-sdk";
 
 const statusBadge: Record<"pending" | "approved" | "rejected", string> = {
   pending: "bg-amber-400/15 text-amber-200",
   approved: "bg-primary/15 text-primary",
   rejected: "bg-rose-400/15 text-rose-300",
 };
+
+const toUint8Array = (buffer: Buffer) => new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength);
 
 type RequestStatus = "pending" | "approved" | "rejected";
 
@@ -75,26 +81,41 @@ const initialAttestations: Attestation[] = [
   {
     week: 41,
     reserveUSD: 512_000,
-    ipfs: { hash: "QmQuarterlyProof41", url: "https://ipfs.io/ipfs/QmQuarterlyProof41" },
-    signedBy: "GBCX6XBDF1S9J7F2A",
+    ipfs: { hash: "bafyproofweek41", url: "https://ipfs.io/ipfs/bafyproofweek41" },
+    metadataCid: "bafymetadataweek41",
+    signedBy: "GBCX6XBDF1S9J7F2A3X1TZXQVPX2VR88Z8YNRX5Q8YZLQM4XCP5K",
+    signature: "h5qQw4k9N6cVxrw7M8Y0xO1WcN5C1s3Y2d4f5g6h7i8j9k0l1m2n==",
+    signatureType: "ed25519",
+    nonce: "9f72b4a1c03d4e7f",
     status: "Verified",
     ts: "2024-01-14T16:45:00.000Z",
+    txHash: "9f0a4d3b7c8e9f1a2b4c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7",
   },
   {
     week: 40,
     reserveUSD: 498_500,
-    ipfs: { hash: "QmQuarterlyProof40", url: "https://ipfs.io/ipfs/QmQuarterlyProof40" },
-    signedBy: "GBCX6XBDF1S9J7F2A",
+    ipfs: { hash: "bafyproofweek40", url: "https://ipfs.io/ipfs/bafyproofweek40" },
+    metadataCid: "bafymetadataweek40",
+    signedBy: "GBCX6XBDF1S9J7F2A3X1TZXQVPX2VR88Z8YNRX5Q8YZLQM4XCP5K",
+    signature: "o1v2w3x4y5z6a7b8c9d0e1f2g3h4i5j6k7l8m9n0o1p2q3r4s5t==",
+    signatureType: "ed25519",
+    nonce: "c187f94e001a7b23",
     status: "Pending",
     ts: "2024-01-07T13:20:00.000Z",
+    txHash: "5e4d3c2b1a0f9e8d7c6b5a4f3e2d1c0b9a8f7e6d5c4b3a2f1e0d9c8b7a6f5e4",
   },
   {
     week: 39,
     reserveUSD: 485_250,
-    ipfs: { hash: "QmQuarterlyProof39", url: "https://ipfs.io/ipfs/QmQuarterlyProof39" },
-    signedBy: "GAKJ8FFL2MN9Q3ZT",
-    status: "Late",
+    ipfs: { hash: "bafyproofweek39", url: "https://ipfs.io/ipfs/bafyproofweek39" },
+    metadataCid: "bafymetadataweek39",
+    signedBy: "GAKJ8FFL2MN9Q3ZT2R8M4YQ2XT1F0VQ7YWN9Z1X2C5VBQJT9M0QL",
+    signature: "s4r3q2p1o0n9m8l7k6j5i4h3g2f1e0d9c8b7a6z5y4x3w2v1u0t==",
+    signatureType: "ed25519",
+    nonce: "5b6c7d8e9f0a1b2c",
+    status: "Invalid",
     ts: "2023-12-30T18:05:00.000Z",
+    txHash: "1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2",
   },
 ];
 
@@ -116,13 +137,31 @@ export default function CustodianPage() {
   const [dateFilter, setDateFilter] = useState("");
 
   const [attestations, setAttestations] = useState<Attestation[]>(initialAttestations);
+  const [submission, setSubmission] = useState<Attestation | null>(null);
+  const verifyingRef = useRef<Set<string>>(new Set());
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [selectedAttestation, setSelectedAttestation] = useState<Attestation | null>(null);
+  const [attestationStatusFilter, setAttestationStatusFilter] = useState<"ALL" | Attestation["status"]>("ALL");
+  const [attestationQuery, setAttestationQuery] = useState("");
 
   const sortedAttestations = useMemo(
     () => [...attestations].sort((a, b) => b.week - a.week),
     [attestations],
   );
+
+  const filteredAttestations = useMemo(() => {
+    const query = attestationQuery.trim().toLowerCase();
+    return sortedAttestations.filter((attestation) => {
+      if (attestationStatusFilter !== "ALL" && attestation.status !== attestationStatusFilter) {
+        return false;
+      }
+      if (!query) return true;
+      const matchesWeek = String(attestation.week) === query;
+      const matchesMetadata = attestation.metadataCid.toLowerCase().includes(query);
+      const matchesTx = attestation.txHash.toLowerCase().includes(query);
+      return matchesWeek || matchesMetadata || matchesTx;
+    });
+  }, [sortedAttestations, attestationStatusFilter, attestationQuery]);
 
   const nextWeek = (sortedAttestations[0]?.week ?? 0) + 1;
 
@@ -184,6 +223,42 @@ export default function CustodianPage() {
     setDrawerOpen(false);
     setSelectedAttestation(null);
   };
+
+  const handleAttestationStatusUpdate = useCallback((metadataCid: string, status: Attestation["status"]) => {
+    setAttestations((prev) =>
+      prev.map((attestation) =>
+        attestation.metadataCid === metadataCid ? { ...attestation, status } : attestation,
+      ),
+    );
+  }, []);
+
+  const verifyAttestationSignature = useCallback(async (attestation: Attestation) => {
+    try {
+      const messageBytes = canonicalizeToCbor({
+        week: attestation.week,
+        reserveAmount: attestation.reserveUSD,
+        timestamp: attestation.ts,
+        nonce: attestation.nonce,
+      });
+      const signatureBytes = new Uint8Array(Buffer.from(attestation.signature, "base64"));
+      const publicKeyRaw = toUint8Array(Keypair.fromPublicKey(attestation.signedBy).rawPublicKey());
+      const verified = await verifyEd25519(publicKeyRaw, messageBytes, signatureBytes);
+      if (verified) {
+        handleAttestationStatusUpdate(attestation.metadataCid, "Verified");
+      }
+    } catch (error) {
+      console.warn("Unable to auto-verify attestation", error);
+    }
+  }, [handleAttestationStatusUpdate]);
+
+  useEffect(() => {
+    const pending = attestations.filter((att) => att.status === "Pending");
+    pending.forEach((att) => {
+      if (verifyingRef.current.has(att.metadataCid)) return;
+      verifyingRef.current.add(att.metadataCid);
+      verifyAttestationSignature(att).finally(() => verifyingRef.current.delete(att.metadataCid));
+    });
+  }, [attestations, verifyAttestationSignature]);
 
 
   useEffect(() => {
@@ -411,20 +486,58 @@ export default function CustodianPage() {
             <CustodianInfo
               name="Stellar Prime Custody"
               wallet={walletAddress}
-              signatureCount={attestations.length}
+              signatureCount={attestations.filter((att) => att.status === "Verified").length}
               lastSignedAt={sortedAttestations.find((att) => att.status === "Verified")?.ts}
             />
             <UploadAttestation
               wallet={walletAddress}
               nextWeek={nextWeek}
-              onUploaded={(att) => setAttestations((prev) => [att, ...prev])}
+              onUploaded={(att) => {
+                setAttestations((prev) => [att, ...prev]);
+                setSubmission(att);
+                void verifyAttestationSignature(att);
+              }}
             />
-            <AttestationTimeline items={sortedAttestations} onOpen={handleDrawerOpen} />
+            <div className="rounded-2xl border border-border/60 bg-card/60 p-4">
+              <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                <div className="flex gap-2 text-xs">
+                  {["ALL", "Verified", "Pending", "Invalid"].map((value) => (
+                    <button
+                      key={value}
+                      type="button"
+                      onClick={() => setAttestationStatusFilter(value as typeof attestationStatusFilter)}
+                      className={[
+                        "rounded-full border px-3 py-1 font-semibold uppercase tracking-wide transition",
+                        attestationStatusFilter === value
+                          ? "border-primary/60 bg-primary/10 text-primary"
+                          : "border-border/40 bg-card/40 text-muted-foreground hover:border-primary/40 hover:text-primary",
+                      ].join(" ")}
+                    >
+                      {value}
+                    </button>
+                  ))}
+                </div>
+                <input
+                  type="search"
+                  value={attestationQuery}
+                  onChange={(event) => setAttestationQuery(event.target.value)}
+                  placeholder="Filter by week, metadata CID, or tx hash"
+                  className="w-full rounded-lg border border-border/50 bg-background px-3 py-2 text-xs text-foreground md:w-64"
+                />
+              </div>
+              <AttestationTimeline items={filteredAttestations} onOpen={handleDrawerOpen} />
+            </div>
           </motion.aside>
         </div>
       </motion.div>
 
-      <AttestationDrawer open={drawerOpen} onClose={handleDrawerClose} item={selectedAttestation} />
+      <AttestationDrawer
+        open={drawerOpen}
+        onClose={handleDrawerClose}
+        item={selectedAttestation}
+        onStatusUpdate={handleAttestationStatusUpdate}
+      />
+      <SubmissionModal open={Boolean(submission)} onClose={() => setSubmission(null)} attestation={submission} />
     </LayoutShell>
   );
 }

@@ -3,50 +3,62 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { motion, useReducedMotion } from "framer-motion";
-import type { Transaction } from "@/src/lib/mockData";
+import type { HorizonPayment } from "@/src/hooks/horizon";
 import { CopyHash } from "@/src/components/ui/CopyHash";
 import { Skeleton } from "@/src/components/ui/Skeleton";
 import { formatCurrency, formatDateTime } from "@/src/lib/utils/format";
 import { transitions, stagger, listItem } from "@/src/components/motion/presets";
+import { STELLAR_NET } from "@/src/utils/constants";
 
-const typeFilters = [
-  { label: "All", value: "ALL" },
-  { label: "Mint", value: "MINT" },
-  { label: "Burn", value: "BURN" },
-  { label: "Distribution", value: "DIST" },
-  { label: "Attestation", value: "ATTEST" },
-] as const;
-
-const statusFilters = [
-  { label: "All", value: "ALL" },
-  { label: "Success", value: "success" },
-  { label: "Pending", value: "pending" },
-  { label: "Failed", value: "failed" },
-] as const;
-
-const statusTone: Record<Transaction["status"], string> = {
+const statusTone: Record<string, string> = {
   success: "border-green-500/40 bg-green-500/10 text-green-200",
-  pending: "border-yellow-400/40 bg-yellow-400/10 text-yellow-200",
   failed: "border-red-500/40 bg-red-500/10 text-red-200",
+  pending: "border-yellow-400/40 bg-yellow-400/10 text-yellow-200",
 };
+
+const explorerSegment = STELLAR_NET.toUpperCase() === "TESTNET" ? "testnet" : "public";
+
+const deriveStatus = (payment: HorizonPayment) => {
+  if (payment.transaction_successful === false) return "failed";
+  if (payment.transaction_successful === true) return "success";
+  return "pending";
+};
+
+const formatType = (type: string) => type.replace(/_/g, " ").replace(/\b\w/g, (char) => char.toUpperCase());
+
+const shortIssuer = (issuer: string) => `${issuer.slice(0, 4)}…${issuer.slice(-4)}`;
 
 type TransactionsTableProps = {
-  transactions: Transaction[];
+  payments: HorizonPayment[];
   isLoading?: boolean;
+  error?: Error | null;
 };
 
-export const TransactionsTable = ({ transactions, isLoading }: TransactionsTableProps) => {
+export const TransactionsTable = ({ payments, isLoading, error }: TransactionsTableProps) => {
   const prefersReducedMotion = useReducedMotion();
-  const [typeFilter, setTypeFilter] = useState<(typeof typeFilters)[number]["value"]>("ALL");
-  const [statusFilter, setStatusFilter] = useState<(typeof statusFilters)[number]["value"]>("ALL");
+  const [typeFilter, setTypeFilter] = useState<string>("ALL");
+  const [statusFilter, setStatusFilter] = useState<string>("ALL");
+
+  const availableTypes = useMemo(() => {
+    const unique = new Set(payments.map((payment) => payment.type));
+    return ["ALL", ...Array.from(unique)];
+  }, [payments]);
 
   const filtered = useMemo(() => {
-    return transactions.filter((tx) => {
-      const typeMatches = typeFilter === "ALL" || tx.type === typeFilter;
-      const statusMatches = statusFilter === "ALL" || tx.status === statusFilter;
+    return payments.filter((payment) => {
+      const status = deriveStatus(payment);
+      const typeMatches = typeFilter === "ALL" || payment.type === typeFilter;
+      const statusMatches = statusFilter === "ALL" || status === statusFilter;
       return typeMatches && statusMatches;
     });
-  }, [transactions, typeFilter, statusFilter]);
+  }, [payments, typeFilter, statusFilter]);
+
+  const statusFilters = [
+    { label: "All", value: "ALL" },
+    { label: "Success", value: "success" },
+    { label: "Pending", value: "pending" },
+    { label: "Failed", value: "failed" },
+  ] as const;
 
   const empty = !isLoading && filtered.length === 0;
 
@@ -55,22 +67,22 @@ export const TransactionsTable = ({ transactions, isLoading }: TransactionsTable
       <header className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
         <div>
           <h2 className="text-sm font-semibold text-foreground/90">Recent Transactions</h2>
-          <p className="text-xs text-muted-foreground">Mint, burn, distribution, and attest actions</p>
+          <p className="text-xs text-muted-foreground">Payments streamed from Horizon</p>
         </div>
         <div className="flex flex-wrap gap-2 text-xs">
-          {typeFilters.map((filter) => (
+          {availableTypes.map((type) => (
             <button
-              key={filter.value}
+              key={type}
               type="button"
-              onClick={() => setTypeFilter(filter.value)}
+              onClick={() => setTypeFilter(type)}
               className={[
                 "rounded-full border px-3 py-1 font-semibold uppercase tracking-wide transition",
-                typeFilter === filter.value
+                typeFilter === type
                   ? "border-primary/60 bg-primary/10 text-primary"
                   : "border-border/40 bg-card/40 text-muted-foreground hover:border-primary/40 hover:text-primary",
               ].join(" ")}
             >
-              {filter.label}
+              {type === "ALL" ? "All" : formatType(type)}
             </button>
           ))}
         </div>
@@ -121,7 +133,7 @@ export const TransactionsTable = ({ transactions, isLoading }: TransactionsTable
             <tbody>
               <tr>
                 <td colSpan={6} className="py-6 text-center text-sm text-muted-foreground">
-                  Henüz işlem yok, mint veya dağıtım yapın.
+                  {error ? "Unable to load payments right now." : "No Horizon payments yet."}
                 </td>
               </tr>
             </tbody>
@@ -132,42 +144,52 @@ export const TransactionsTable = ({ transactions, isLoading }: TransactionsTable
               variants={prefersReducedMotion ? undefined : stagger(0.06)}
               className="align-middle"
             >
-              {filtered.map((tx) => (
-                <motion.tr
-                  key={tx.hash}
-                  variants={prefersReducedMotion ? undefined : listItem}
-                  transition={transitions.fast}
-                  className="border-t border-border/20 text-sm transition hover:bg-border/10"
-                >
-                  <td className="py-3 pr-6 text-xs text-muted-foreground">{formatDateTime(tx.ts)}</td>
-                  <td className="py-3 pr-6 text-sm font-semibold text-foreground/80">{tx.type}</td>
-                  <td className="py-3 pr-6 text-sm text-foreground/70">{tx.asset}</td>
-                  <td className="py-3 pr-6 text-right font-semibold text-foreground/90">
-                    {tx.amount ? formatCurrency(tx.amount) : "—"}
-                  </td>
-                  <td className="py-3 pr-6">
-                    <div className="flex items-center gap-2">
-                      <CopyHash value={tx.hash} />
-                      <Link
-                        href={`https://stellar.expert/explorer/${tx.hash}`}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="text-xs text-primary hover:underline"
+              {filtered.map((payment) => {
+                const status = deriveStatus(payment);
+                const assetLabel = payment.asset_type === "native" ? "XLM" : payment.asset_code ?? "Asset";
+                const amount = payment.amount ? Number.parseFloat(payment.amount) : undefined;
+                return (
+                  <motion.tr
+                    key={payment.id}
+                    variants={prefersReducedMotion ? undefined : listItem}
+                    transition={transitions.fast}
+                    className="border-t border-border/20 text-sm transition hover:bg-border/10"
+                  >
+                    <td className="py-3 pr-6 text-xs text-muted-foreground">{formatDateTime(payment.created_at)}</td>
+                    <td className="py-3 pr-6 text-sm font-semibold text-foreground/80">{formatType(payment.type)}</td>
+                    <td className="py-3 pr-6 text-sm text-foreground/70">
+                      {assetLabel}
+                      {payment.asset_issuer ? (
+                        <span className="ml-2 text-xs text-muted-foreground">{shortIssuer(payment.asset_issuer)}</span>
+                      ) : null}
+                    </td>
+                    <td className="py-3 pr-6 text-right font-semibold text-foreground/90">
+                      {amount != null ? formatCurrency(amount) : "—"}
+                    </td>
+                    <td className="py-3 pr-6">
+                      <div className="flex items-center gap-2">
+                        <CopyHash value={payment.transaction_hash} />
+                        <Link
+                          href={`https://stellar.expert/explorer/${explorerSegment}/tx/${payment.transaction_hash}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-xs text-primary hover:underline"
+                        >
+                          View
+                        </Link>
+                      </div>
+                    </td>
+                    <td className="py-3">
+                      <span
+                        className={["rounded-full border px-2 py-0.5 text-xs font-semibold", statusTone[status] ?? statusTone.pending].join(" ")}
+                        aria-label={`Status ${status}`}
                       >
-                        View
-                      </Link>
-                    </div>
-                  </td>
-                  <td className="py-3">
-                    <span
-                      className={["rounded-full border px-2 py-0.5 text-xs font-semibold", statusTone[tx.status]].join(" ")}
-                      aria-label={`Status ${tx.status}`}
-                    >
-                      {tx.status}
-                    </span>
-                  </td>
-                </motion.tr>
-              ))}
+                        {status}
+                      </span>
+                    </td>
+                  </motion.tr>
+                );
+              })}
             </motion.tbody>
           )}
         </table>

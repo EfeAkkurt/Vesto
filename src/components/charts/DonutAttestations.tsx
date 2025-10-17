@@ -10,15 +10,15 @@ import {
   Tooltip as RechartsTooltip,
   type TooltipProps,
 } from "recharts";
-import type { Attestation } from "@/src/lib/mockData";
+import type { Attestation } from "@/src/lib/types/proofs";
 import { ChartWrapper } from "@/src/components/charts/ChartWrapper";
 import { CopyHash } from "@/src/components/ui/CopyHash";
 import { formatDate } from "@/src/lib/utils/format";
 
 const colors: Record<Attestation["status"], string> = {
-  ok: "var(--color-primary)",
-  pending: "var(--color-muted)",
-  late: "var(--color-destructive)",
+  Verified: "var(--color-primary)",
+  Pending: "var(--color-muted)",
+  Invalid: "var(--color-destructive)",
 };
 
 type DonutAttestationsProps = {
@@ -33,9 +33,9 @@ type PieDatum = {
 };
 
 const buildSegments = (items: Attestation[]): PieDatum[] => {
-  const counts: Record<Attestation["status"], number> = { ok: 0, pending: 0, late: 0 };
+  const counts: Record<Attestation["status"], number> = { Verified: 0, Pending: 0, Invalid: 0 };
   items.forEach((item) => {
-    counts[item.status] += 1;
+    counts[item.status] = (counts[item.status] ?? 0) + 1;
   });
   return (Object.keys(counts) as Attestation["status"][])
     .filter((status) => counts[status] > 0)
@@ -45,8 +45,7 @@ const buildSegments = (items: Attestation[]): PieDatum[] => {
 const CustomTooltip = ({ active, payload }: TooltipProps<number, string>) => {
   if (!active || !payload?.length) return null;
   const datum = payload[0].payload as PieDatum;
-  const label =
-    datum.status === "ok" ? "Signed" : datum.status === "pending" ? "Pending" : "Late";
+  const label = datum.status;
   return (
     <div className="rounded-lg border border-border/50 bg-background/80 px-3 py-2 text-xs text-foreground shadow-lg">
       <p className="font-semibold">{label}</p>
@@ -58,7 +57,7 @@ const CustomTooltip = ({ active, payload }: TooltipProps<number, string>) => {
 export const DonutAttestations = ({ attestations, isLoading }: DonutAttestationsProps) => {
   const segments = useMemo(() => buildSegments(attestations), [attestations]);
   const total = attestations.length;
-  const signed = segments.find((segment) => segment.status === "ok")?.value ?? 0;
+  const signed = segments.find((segment) => segment.status === "Verified")?.value ?? 0;
   const percentSigned = total === 0 ? 0 : Math.round((signed / total) * 100);
 
   return (
@@ -112,14 +111,12 @@ export const DonutAttestations = ({ attestations, isLoading }: DonutAttestations
                 <p className="text-sm font-semibold text-foreground/90">
                   Week {item.week} • {formatDate(item.ts)}
                 </p>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  Custodian sig: {item.status === "ok" ? "✓" : item.status === "pending" ? "Pending" : "Late"}
-                </p>
+                <p className="mt-1 text-xs text-muted-foreground">Custodian status: {item.status}</p>
               </div>
               <div className="flex flex-col items-end gap-2">
-                <CopyHash value={item.ipfs} className="border-transparent bg-transparent px-0 py-0" short={false} />
+                <CopyHash value={item.ipfs.hash} className="border-transparent bg-transparent px-0 py-0" short={false} />
                 <Link
-                  href={`https://ipfs.io/ipfs/${item.ipfs}`}
+                  href={item.ipfs.url ?? `https://ipfs.io/ipfs/${item.ipfs.hash}`}
                   target="_blank"
                   rel="noreferrer"
                   className="text-xs font-semibold text-primary transition hover:underline"

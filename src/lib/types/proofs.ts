@@ -57,7 +57,12 @@ export interface Attestation {
   week: number;
   reserveUSD: number;
   ipfs: ProofRef;
+  metadataCid: string;
   signedBy: string;
-  status: "Pending" | "Verified" | "Late";
+  signature: string;
+  signatureType: "ed25519";
+  nonce: string;
+  status: "Pending" | "Verified" | "Invalid";
   ts: string;
+  txHash: string;
 }

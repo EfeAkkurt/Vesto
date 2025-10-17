@@ -1,10 +1,15 @@
 "use client";
 
 import { useState } from "react";
+import { Buffer } from "buffer";
+import { Keypair, Networks } from "stellar-sdk";
 import { useToast } from "@/src/components/ui/Toast";
 import { Loader } from "@/src/components/ui/Loader";
-import { mockUpload } from "@/src/lib/utils/ipfs";
 import type { Attestation } from "@/src/lib/types/proofs";
+import { uploadFile, putDagCbor, getViaGateway } from "@/src/lib/ipfs/client";
+import { HORIZON, STELLAR_NET } from "@/src/utils/constants";
+import { canonicalizeToCbor, signEd25519, buildAndSubmitMemoTx, type AttestationMsg } from "@/src/lib/custodian/attestation";
+import { AttestationMetadataSchema } from "@/src/lib/custodian/schema";
 
 export type UploadAttestationProps = {
   wallet: string;
@@ -12,14 +17,28 @@ export type UploadAttestationProps = {
   onUploaded: (attestation: Attestation) => void;
 };
 
-type FormErrors = Partial<Record<"reserveUSD" | "file", string>>;
+type FormErrors = Partial<Record<"reserveUSD" | "file" | "secret", string>>;
+
+type SubmissionStage = "idle" | "uploading" | "signing" | "submitting";
+
+const getNetworkPassphrase = () => (STELLAR_NET?.toUpperCase() === "MAINNET" ? Networks.PUBLIC : Networks.TESTNET);
+
+const toUint8Array = (buffer: Buffer) => new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength);
+
+const generateNonce = () => {
+  const source = globalThis.crypto?.getRandomValues(new Uint8Array(16));
+  const bytes = source ?? Uint8Array.from({ length: 16 }, () => Math.floor(Math.random() * 256));
+  return Buffer.from(bytes).toString("hex");
+};
 
 export const UploadAttestation = ({ wallet, nextWeek, onUploaded }: UploadAttestationProps) => {
   const { toast } = useToast();
   const [reserveUSD, setReserveUSD] = useState("");
   const [file, setFile] = useState<File | null>(null);
+  const [secret, setSecret] = useState("");
   const [errors, setErrors] = useState<FormErrors>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [stage, setStage] = useState<SubmissionStage>("idle");
 
   const clearError = (key: keyof FormErrors) => {
     setErrors((prev) => {
@@ -39,6 +58,9 @@ export const UploadAttestation = ({ wallet, nextWeek, onUploaded }: UploadAttest
     if (!file) {
       nextErrors.file = "Attach the signed attestation.";
     }
+    if (!secret.trim()) {
+      nextErrors.secret = "Provide the custodian secret key.";
+    }
     setErrors(nextErrors);
     return {
       valid: Object.keys(nextErrors).length === 0,
@@ -53,26 +75,81 @@ export const UploadAttestation = ({ wallet, nextWeek, onUploaded }: UploadAttest
     if (!valid || !file) return;
 
     setIsSubmitting(true);
+    setStage("uploading");
     try {
-      const proof = await mockUpload(file);
+      const keypair = Keypair.fromSecret(secret.trim());
+      const timestamp = new Date().toISOString();
+      const nonce = generateNonce();
+
+      const fileCid = await uploadFile(file);
+
+      const metadata = AttestationMetadataSchema.parse({
+        schema: "vesto.attestation.metadata@1",
+        week: nextWeek,
+        reserveAmount: value,
+        fileCid,
+        issuer: wallet,
+        timestamp,
+        mime: file.type || "application/octet-stream",
+        size: file.size,
+      });
+
+      const metadataCid = await putDagCbor(metadata);
+
+      setStage("signing");
+      const message: AttestationMsg = {
+        week: nextWeek,
+        reserveAmount: value,
+        timestamp,
+        nonce,
+      };
+      const messageBytes = canonicalizeToCbor(message);
+      const signatureBytes = await signEd25519(toUint8Array(keypair.rawSecretKey()), messageBytes);
+      const signature = Buffer.from(signatureBytes).toString("base64");
+
+      setStage("submitting");
+      const txHash = await buildAndSubmitMemoTx({
+        secret: secret.trim(),
+        memoTextCID: metadataCid,
+        serverUrl: HORIZON,
+        networkPassphrase: getNetworkPassphrase(),
+      });
+
       const attestation: Attestation = {
         week: nextWeek,
         reserveUSD: value,
-        ipfs: proof,
-        signedBy: wallet,
-        status: "Verified",
-        ts: new Date().toISOString(),
+        ipfs: {
+          hash: fileCid,
+          url: getViaGateway(fileCid),
+          size: file.size,
+          mime: file.type || "application/octet-stream",
+        },
+        metadataCid,
+        signedBy: keypair.publicKey(),
+        signature,
+        signatureType: "ed25519",
+        nonce,
+        status: "Pending",
+        ts: timestamp,
+        txHash,
       };
+
       onUploaded(attestation);
-      toast({ title: "Attestation uploaded", description: `Week ${nextWeek} added to the log.`, variant: "success" });
+      toast({
+        title: "Attestation submitted",
+        description: `Week ${nextWeek} signed and broadcasted.`,
+        variant: "success",
+      });
       setReserveUSD("");
       setFile(null);
+      setSecret("");
       setErrors({});
     } catch (error) {
       console.error("Failed to upload attestation", error);
-      toast({ title: "Upload failed", description: "Please retry in a moment.", variant: "error" });
+      toast({ title: "Attestation failed", description: "Check credentials and try again.", variant: "error" });
     } finally {
       setIsSubmitting(false);
+      setStage("idle");
     }
   };
 
@@ -95,6 +172,20 @@ export const UploadAttestation = ({ wallet, nextWeek, onUploaded }: UploadAttest
         {errors.reserveUSD ? <p className="mt-1 text-xs text-rose-400">{errors.reserveUSD}</p> : null}
       </div>
       <div>
+        <label className="text-sm font-medium text-foreground/90">Custodian Secret (ed25519 seed)</label>
+        <input
+          type="password"
+          value={secret}
+          onChange={(event) => {
+            setSecret(event.target.value);
+            clearError("secret");
+          }}
+          placeholder="S..."
+          className="mt-2 w-full rounded-lg border border-border/50 bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+        />
+        {errors.secret ? <p className="mt-1 text-xs text-rose-400">{errors.secret}</p> : null}
+      </div>
+      <div>
         <label className="text-sm font-medium text-foreground/90">Signed Attestation (PDF)</label>
         <label
           htmlFor="attestation-upload"
@@ -103,7 +194,7 @@ export const UploadAttestation = ({ wallet, nextWeek, onUploaded }: UploadAttest
           <input
             id="attestation-upload"
             type="file"
-            accept=".pdf,.jpg,.jpeg,.png"
+            accept=".pdf,.json,.jpg,.jpeg,.png"
             onChange={(event) => {
               const nextFile = event.target.files?.[0] ?? null;
               setFile(nextFile);
@@ -125,7 +216,13 @@ export const UploadAttestation = ({ wallet, nextWeek, onUploaded }: UploadAttest
         className="flex w-full items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground transition hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
       >
         {isSubmitting ? <Loader size="sm" /> : null}
-        {isSubmitting ? "Saving" : "Upload Attestation"}
+        {isSubmitting
+          ? stage === "uploading"
+            ? "Uploading"
+            : stage === "signing"
+            ? "Signing"
+            : "Submitting"
+          : "Upload Attestation"}
       </button>
     </form>
   );

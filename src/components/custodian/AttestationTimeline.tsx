@@ -13,7 +13,7 @@ export type AttestationTimelineProps = {
 const statusStyles: Record<Attestation["status"], { dot: string; badge: string }> = {
   Verified: { dot: "bg-[#ADD015]", badge: "bg-primary/15 text-primary" },
   Pending: { dot: "bg-amber-300", badge: "bg-amber-400/15 text-amber-200" },
-  Late: { dot: "bg-rose-400", badge: "bg-rose-400/15 text-rose-300" },
+  Invalid: { dot: "bg-rose-400", badge: "bg-rose-400/15 text-rose-300" },
 };
 
 const listVariants = {
@@ -71,7 +71,22 @@ export const AttestationTimeline = ({ items, onOpen }: AttestationTimelineProps)
                   <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${styles.badge}`}>{item.status}</span>
                 </div>
                 <p className="text-xs text-muted-foreground">Signed on {formatDate(item.ts)} by {item.signedBy}</p>
-                <CopyHash value={item.ipfs.hash} />
+                <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
+                  <span className="font-medium text-foreground/80">File</span>
+                  <CopyHash value={item.ipfs.hash} />
+                </div>
+                <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
+                  <span className="font-medium text-foreground/80">Metadata</span>
+                  <CopyHash value={item.metadataCid} />
+                </div>
+                <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
+                  <span className="font-medium text-foreground/80">Signature</span>
+                  <CopyHash value={item.signature} />
+                </div>
+                <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
+                  <span className="font-medium text-foreground/80">TxHash</span>
+                  <CopyHash value={item.txHash} />
+                </div>
               </div>
               <div className="flex items-start justify-end">
                 <button

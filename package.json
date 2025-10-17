@@ -9,14 +9,21 @@
     "lint": "eslint"
   },
   "dependencies": {
-    "@tanstack/react-query": "^5.90.3",
+    "@noble/hashes": "^1.8.0",
+    "@stellar/freighter-api": "^5.0.0",
+    "cborg": "^4.2.18",
     "framer-motion": "^12.23.24",
+    "ipfs-http-client": "^60.0.1",
+    "isomorphic-ws": "^5.0.0",
+    "lucide-react": "^0.546.0",
+    "multiformats": "^13.4.1",
     "next": "15.5.5",
     "react": "19.1.0",
     "react-dom": "19.1.0",
+    "recharts": "^2.12.7",
     "stellar-sdk": "^13.3.0",
-    "@stellar/freighter-api": "^5.0.0",
-    "recharts": "^2.12.7"
+    "swr": "^2.3.6",
+    "tweetnacl": "^1.0.3"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3",
@@ -27,6 +34,7 @@
     "eslint": "^9",
     "eslint-config-next": "15.5.5",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "typescript": "^5",
+    "zod": "^4.1.12"
   }
 }

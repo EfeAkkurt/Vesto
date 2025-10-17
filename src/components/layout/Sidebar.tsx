@@ -5,12 +5,25 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import VestoLogo from "@/components/VestoLogo";
 import type { WalletHook } from "@/src/hooks/useWallet";
-import type { NetworkHealth } from "@/src/lib/mockData";
+import type { NetworkHealth } from "@/src/hooks/useNetworkHealth";
 import { SIDEBAR_NAV } from "@/src/utils/constants";
 import { cn } from "@/src/utils/cn";
 import { shortAddress, formatCurrency } from "@/src/lib/utils/format";
 import ConnectWalletButton from "@/components/ConnectWalletButton";
 import NetworkStatus from "@/components/NetworkStatus";
+
+const formatLatency = (latencyMs: number) => {
+  if (!Number.isFinite(latencyMs) || latencyMs <= 0) return "<1s";
+  if (latencyMs < 1_000) {
+    return `${Math.round(latencyMs)}ms`;
+  }
+  const seconds = latencyMs / 1_000;
+  if (seconds < 60) {
+    return `${seconds.toFixed(seconds < 10 ? 1 : 0)}s`;
+  }
+  const minutes = seconds / 60;
+  return `${minutes.toFixed(minutes < 10 ? 1 : 0)}m`;
+};
 
 const NavIcon = ({ icon }: { icon: (typeof SIDEBAR_NAV)[number]["icon"] }) => {
   const props = { className: "size-5", viewBox: "0 0 24 24", stroke: "currentColor", strokeWidth: 1.6, fill: "none" } as const;
@@ -171,8 +184,8 @@ export const Sidebar = ({
               <span className={cn(networkHealth.horizonHealthy ? "text-primary" : "text-destructive")}>{networkHealth.horizonHealthy ? "Healthy" : "Degraded"}</span>
             </div>
             <div className="flex items-center justify-between rounded-xl border border-border/40 bg-border/10 px-3 py-2 text-xs uppercase tracking-wide text-foreground/70">
-              <span>Latency</span>
-              <span>{networkHealth.latencyMs}ms</span>
+              <span>Ledger lag</span>
+              <span>{networkHealth.isLoading ? "—" : formatLatency(networkHealth.latencyMs)}</span>
             </div>
           </div>
         </div>
