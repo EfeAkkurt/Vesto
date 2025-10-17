@@ -89,18 +89,19 @@ export const deriveHoldings = (account?: HorizonAccount | null): HoldingDatum[] 
     .filter((item): item is HoldingDatum => item !== null);
 };
 
-export const deriveKpi = (account?: HorizonAccount | null): DashboardKpi => {
+export const deriveKpi = (account?: HorizonAccount | null, mintedSupply?: number): DashboardKpi => {
   const holdings = deriveHoldings(account);
   const portfolioUSD = holdings.reduce((total, holding) => total + holding.usd, 0);
-  const rwaUSD = holdings.filter((holding) => holding.type === "RWA").reduce((total, holding) => total + holding.usd, 0);
+  const rwaUSDHoldings = holdings.filter((holding) => holding.type === "RWA").reduce((total, holding) => total + holding.usd, 0);
+  const minted = mintedSupply ?? rwaUSDHoldings;
   const reserveUSD = holdings.filter((holding) => holding.type === "Stable").reduce((total, holding) => total + holding.usd, 0);
-  const coverageBase = rwaUSD <= 0 ? (reserveUSD > 0 ? 100 : 0) : (reserveUSD / rwaUSD) * 100;
+  const coverageBase = minted <= 0 ? (reserveUSD > 0 ? 100 : 0) : (reserveUSD / minted) * 100;
   const coverage = Number.isFinite(coverageBase) ? Math.max(0, Math.min(coverageBase, 100)) : 0;
   const holders = account?.balances.filter((balance) => safeParseFloat(balance.balance) > 0 && balance.asset_type !== "liquidity_pool_shares").length ?? 0;
 
   return {
     portfolioUSD,
-    minted: rwaUSD,
+    minted,
     coverage,
     holders,
     updatedAt: account?.last_modified_time ?? new Date().toISOString(),

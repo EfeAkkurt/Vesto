@@ -7,7 +7,17 @@ export type NavItem = {
 
 export const HORIZON = process.env.NEXT_PUBLIC_HORIZON_URL!;
 export const STELLAR_NET = process.env.NEXT_PUBLIC_STELLAR_NETWORK!;
-export const IPFS_ENDPOINT = process.env.NEXT_PUBLIC_IPFS_ENDPOINT!;
+
+const DEFAULT_IPFS_GATEWAY = "https://gateway.lighthouse.storage/ipfs/";
+
+const gatewayCandidate =
+  (process.env.NEXT_PUBLIC_IPFS_GATEWAY ?? process.env.IPFS_GATEWAY ?? DEFAULT_IPFS_GATEWAY) as string;
+const trimmedGateway = gatewayCandidate.trim() || DEFAULT_IPFS_GATEWAY;
+export const IPFS_GATEWAY = trimmedGateway.endsWith("/") ? trimmedGateway.slice(0, -1) : trimmedGateway;
+export const CUSTODIAN_ACCOUNT = process.env.NEXT_PUBLIC_CUSTODIAN_ACCOUNT?.trim() ?? "";
+export const ISSUER_ACCOUNT = process.env.NEXT_PUBLIC_ISSUER_ACCOUNT?.trim() ?? "";
+export const TOKEN_ASSET_CODE = process.env.NEXT_PUBLIC_TOKEN_ASSET_CODE?.trim() ?? "";
+export const TOKEN_ASSET_ISSUER = process.env.NEXT_PUBLIC_TOKEN_ASSET_ISSUER?.trim() ?? "";
 
 export const SIDEBAR_NAV: NavItem[] = [
   { key: "dashboard", label: "Dashboard", href: "/dashboard", icon: "dashboard" },

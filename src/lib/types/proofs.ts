@@ -5,6 +5,7 @@ export interface ProofRef {
   url: string;
   size?: number;
   mime?: string;
+  name?: string;
 }
 
 export type ProofType =
@@ -51,6 +52,10 @@ export interface MintResult {
   tokenId: string;
   supply: number;
   proof: ProofRef;
+  metadataCid?: string;
+  txHash?: string;
+  destination?: string;
+  requestCid?: string;
 }
 
 export interface Attestation {
@@ -65,4 +70,5 @@ export interface Attestation {
   status: "Pending" | "Verified" | "Invalid";
   ts: string;
   txHash: string;
+  requestCid?: string;
 }

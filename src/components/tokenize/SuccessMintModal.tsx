@@ -6,6 +6,7 @@ import { createPortal } from "react-dom";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { CopyHash } from "@/src/components/ui/CopyHash";
 import { formatUSD } from "@/src/lib/utils/format";
+import { STELLAR_NET } from "@/src/utils/constants";
 import type { MintResult } from "@/src/lib/types/proofs";
 
 export type SuccessMintModalProps = {
@@ -69,6 +70,13 @@ export const SuccessMintModal = forwardRef<SuccessMintModalHandle, SuccessMintMo
     }, [open, onClose]);
 
     const content = useMemo(() => result ?? null, [result]);
+    const explorerUrl = useMemo(() => {
+      if (!content?.txHash) return null;
+      const base = STELLAR_NET?.toUpperCase() === "MAINNET"
+        ? "https://stellar.expert/explorer/public/tx/"
+        : "https://stellar.expert/explorer/testnet/tx/";
+      return `${base}${content.txHash}`;
+    }, [content?.txHash]);
 
     if (!mounted) return null;
 
@@ -105,9 +113,9 @@ export const SuccessMintModal = forwardRef<SuccessMintModalHandle, SuccessMintMo
                   </span>
                   <div>
                     <h2 id="success-mint-title" className="text-xl font-semibold text-foreground">
-                      Token minted successfully
+                      Tokenization request submitted
                     </h2>
-                    <p className="text-sm text-muted-foreground">The asset is live and ready for custodian review.</p>
+                    <p className="text-sm text-muted-foreground">Custodian will review the on-chain memo and publish an attestation soon.</p>
                   </div>
                 </div>
                 <button
@@ -125,9 +133,41 @@ export const SuccessMintModal = forwardRef<SuccessMintModalHandle, SuccessMintMo
                   <span className="font-semibold text-foreground">{content.tokenId}</span>
                 </div>
                 <div className="flex items-center justify-between">
-                  <span className="text-muted-foreground">Minted Supply</span>
+                  <span className="text-muted-foreground">Requested Value</span>
                   <span className="font-semibold text-foreground">{formatUSD(content.supply)}</span>
                 </div>
+                {content.metadataCid ? (
+                  <div>
+                    <span className="text-muted-foreground">Request CID</span>
+                    <div className="mt-2">
+                      <CopyHash value={content.metadataCid} />
+                    </div>
+                  </div>
+                ) : null}
+                {content.txHash ? (
+                  <div>
+                    <span className="text-muted-foreground">Transaction</span>
+                    <div className="mt-2">
+                      <CopyHash value={content.txHash} />
+                    </div>
+                  </div>
+                ) : null}
+                {content.destination ? (
+                  <div>
+                    <span className="text-muted-foreground">Custodian</span>
+                    <div className="mt-2">
+                      <CopyHash value={content.destination} />
+                    </div>
+                  </div>
+                ) : null}
+                {content.requestCid ? (
+                  <div>
+                    <span className="text-muted-foreground">Linked Request</span>
+                    <div className="mt-2">
+                      <CopyHash value={content.requestCid} />
+                    </div>
+                  </div>
+                ) : null}
                 <div>
                   <span className="text-muted-foreground">Proof</span>
                   <div className="mt-2">
@@ -137,6 +177,16 @@ export const SuccessMintModal = forwardRef<SuccessMintModalHandle, SuccessMintMo
               </div>
 
               <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:justify-end">
+                {explorerUrl ? (
+                  <a
+                    href={explorerUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center justify-center rounded-lg border border-border/60 px-4 py-2 text-sm font-semibold text-foreground transition hover:border-primary/50 hover:text-primary"
+                  >
+                    View on Explorer
+                  </a>
+                ) : null}
                 <Link
                   href="/custodian"
                   ref={(node) => {

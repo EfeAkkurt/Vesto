@@ -1,41 +1,63 @@
-import { CID } from "multiformats/cid";
-import { encode, decode } from "cborg";
-import { IPFS_ENDPOINT } from "@/src/utils/constants";
+import { IPFS_GATEWAY } from "@/src/utils/constants";
 
-type IpfsModule = typeof import("ipfs-http-client");
-type IpfsClient = Awaited<ReturnType<IpfsModule["create"]>>;
-
-let ipfsClientPromise: Promise<IpfsClient> | null = null;
-
-const getIpfs = async (): Promise<IpfsClient> => {
+const ensureBrowser = () => {
   if (typeof window === "undefined") {
-    throw new Error("IPFS client is only available in the browser environment");
+    throw new Error("IPFS client helpers are only available in the browser");
+  }
+};
+
+const extractErrorMessage = async (response: Response): Promise<string> => {
+  const fallback = `IPFS request failed (${response.status})`;
+  try {
+    const data = (await response.json()) as { error?: string };
+    if (data?.error) return data.error;
+  } catch {
+    // Ignore JSON parsing errors; fall back to status text.
   }
 
-  if (!ipfsClientPromise) {
-    ipfsClientPromise = import("ipfs-http-client").then(({ create }) => create({ url: IPFS_ENDPOINT }));
-  }
+  return response.statusText ? `${fallback}: ${response.statusText}` : fallback;
+};
 
-  return ipfsClientPromise;
+const parseCid = (payload: unknown): string => {
+  if (payload && typeof payload === "object" && "cid" in payload && typeof (payload as { cid?: unknown }).cid === "string") {
+    return (payload as { cid: string }).cid;
+  }
+  throw new Error("IPFS response did not include a CID");
 };
 
 export const uploadFile = async (file: Blob): Promise<string> => {
-  const ipfs = await getIpfs();
-  const result = await ipfs.add(file, {
-    cidVersion: 1,
-    rawLeaves: true,
+  ensureBrowser();
+  const formData = new FormData();
+  formData.append("file", file);
+
+  const response = await fetch("/api/ipfs/file", {
+    method: "POST",
+    body: formData,
   });
-  return result.cid.toV1().toString();
+
+  if (!response.ok) {
+    throw new Error(await extractErrorMessage(response));
+  }
+
+  const data = (await response.json()) as unknown;
+  return parseCid(data);
 };
 
 export const putDagCbor = async (value: unknown): Promise<string> => {
-  const ipfs = await getIpfs();
-  const canonical = decode(encode(value));
-  const cid = await ipfs.dag.put(canonical, {
-    storeCodec: "dag-cbor",
-    hashAlg: "sha2-256",
+  ensureBrowser();
+
+  const response = await fetch("/api/ipfs/dag", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ value }),
   });
-  return CID.asCID(cid)?.toV1().toString() ?? cid.toString();
+
+  if (!response.ok) {
+    throw new Error(await extractErrorMessage(response));
+  }
+
+  const data = (await response.json()) as unknown;
+  return parseCid(data);
 };
 
-export const getViaGateway = (cid: string): string => `https://ipfs.io/ipfs/${cid}`;
+export const getViaGateway = (cid: string): string => `${IPFS_GATEWAY}/${cid}`;

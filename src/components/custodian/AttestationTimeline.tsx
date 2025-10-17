@@ -75,15 +75,21 @@ export const AttestationTimeline = ({ items, onOpen }: AttestationTimelineProps)
                   <span className="font-medium text-foreground/80">File</span>
                   <CopyHash value={item.ipfs.hash} />
                 </div>
+              <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
+                <span className="font-medium text-foreground/80">Metadata</span>
+                <CopyHash value={item.metadataCid} />
+              </div>
+              {item.requestCid ? (
                 <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
-                  <span className="font-medium text-foreground/80">Metadata</span>
-                  <CopyHash value={item.metadataCid} />
+                  <span className="font-medium text-foreground/80">Request CID</span>
+                  <CopyHash value={item.requestCid} />
                 </div>
-                <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
-                  <span className="font-medium text-foreground/80">Signature</span>
-                  <CopyHash value={item.signature} />
-                </div>
-                <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
+              ) : null}
+              <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
+                <span className="font-medium text-foreground/80">Signature</span>
+                <CopyHash value={item.signature} />
+              </div>
+              <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
                   <span className="font-medium text-foreground/80">TxHash</span>
                   <CopyHash value={item.txHash} />
                 </div>

@@ -1,7 +1,9 @@
+import { Buffer } from "buffer";
 import { encode } from "cborg";
 import nacl from "tweetnacl";
 import { loadStellar } from "@/src/lib/stellar/sdk";
 import { AttestationMsgSchema, type AttestationMsgShape } from "@/src/lib/custodian/schema";
+import { signTx } from "@/lib/wallet/freighter";
 
 export type AttestationMsg = AttestationMsgShape;
 
@@ -40,6 +42,19 @@ export const canonicalizeToCbor = (message: AttestationMsg): Uint8Array => {
   return encode(normalized);
 };
 
+const textEncoder = typeof TextEncoder !== "undefined" ? new TextEncoder() : null;
+
+export const serializeAttestationMessage = (message: AttestationMsg) => {
+  const canonicalBytes = canonicalizeToCbor(message);
+  const base64 = Buffer.from(canonicalBytes).toString("base64");
+  const bytes = textEncoder?.encode(base64) ?? Buffer.from(base64, "utf8");
+  return {
+    canonicalBytes,
+    base64,
+    textBytes: bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes),
+  };
+};
+
 const getSubtle = () => (typeof globalThis !== "undefined" ? globalThis.crypto?.subtle ?? null : null);
 
 type ImportedKey = { key: CryptoKey; algorithm: "Ed25519" | "NODE-ED25519" };
@@ -70,29 +85,6 @@ const importSubtleKey = async (
   return null;
 };
 
-const normalizePrivateKey = (secretKey: Uint8Array): Uint8Array => {
-  if (secretKey.length === nacl.sign.secretKeyLength) return secretKey;
-  if (secretKey.length === nacl.sign.seedLength) {
-    return nacl.sign.keyPair.fromSeed(secretKey).secretKey;
-  }
-  throw new Error("Invalid ed25519 private key length. Expected 32 or 64 bytes.");
-};
-
-export const signEd25519 = async (privateKeyRaw: Uint8Array, bytes: Uint8Array): Promise<Uint8Array> => {
-  const imported = await importSubtleKey(privateKeyRaw, "private");
-  if (imported) {
-    const signature = await getSubtle()!.sign(
-      imported.algorithm,
-      imported.key,
-      bytes as unknown as BufferSource,
-    );
-    return toUint8Array(signature);
-  }
-
-  const normalized = normalizePrivateKey(privateKeyRaw);
-  return nacl.sign.detached(bytes, normalized);
-};
-
 const normalizePublicKey = (publicKey: Uint8Array): Uint8Array => {
   if (publicKey.length === nacl.sign.publicKeyLength) return publicKey;
   throw new Error("Invalid ed25519 public key length. Expected 32 bytes.");
@@ -118,7 +110,7 @@ export const verifyEd25519 = async (
 };
 
 type SubmitMemoTxArgs = {
-  secret: string;
+  account: string;
   destination?: string;
   memoCid: string;
   networkPassphrase: string;
@@ -135,37 +127,11 @@ type StellarServerLike = {
     thresholds: Record<string, number>;
     balances: Array<Record<string, unknown>>;
     signers: Array<Record<string, unknown>>;
+    accountId(): string;
+    sequenceNumber(): string;
+    incrementSequenceNumber(): void;
   }>;
   fetchBaseFee(): Promise<number>;
-  submitTransaction(tx: unknown): Promise<{ hash: string }>;
-};
-
-type TransactionEnvelopeLike = {
-  sign(...signers: Array<Record<string, unknown>>): void;
-};
-
-type TransactionBuilderLike = {
-  addOperation(operation: unknown): TransactionBuilderLike;
-  addMemo(memo: unknown): TransactionBuilderLike;
-  setTimeout(timeout: number): TransactionBuilderLike;
-  build(): TransactionEnvelopeLike;
-};
-
-type MemoFactory = {
-  text(value: string): unknown;
-  hash(value: string): unknown;
-};
-
-type OperationFactory = {
-  payment(args: { destination: string; asset: unknown; amount: string }): unknown;
-};
-
-type KeypairFactory = {
-  fromSecret(secret: string): Record<string, unknown> & { publicKey(): string };
-};
-
-type AssetFactory = {
-  native(): unknown;
 };
 
 const bytesToHex = (bytes: Uint8Array): string =>
@@ -197,8 +163,92 @@ const hashCidToHex = async (cid: string): Promise<string> => {
   return bytesToHex(digest);
 };
 
+type HorizonSubmitSuccess = {
+  hash?: string;
+  id?: string;
+  transaction_hash?: string;
+};
+
+type HorizonSubmitFailure = {
+  error?: string;
+  title?: string;
+  detail?: string;
+  extras?: {
+    result_codes?: {
+      transaction?: string;
+      operations?: string[];
+    };
+  };
+};
+
+const extractHorizonHash = (payload: HorizonSubmitSuccess): string => {
+  if (payload.hash && payload.hash.length > 0) return payload.hash;
+  if (payload.transaction_hash && payload.transaction_hash.length > 0) return payload.transaction_hash;
+  if (payload.id && payload.id.length > 0) return payload.id;
+  throw new Error("Horizon response missing transaction hash.");
+};
+
+const buildHorizonError = (status: number, payload: HorizonSubmitFailure | null, fallback: string): Error => {
+  const base = payload ?? {};
+  const codes = base.extras?.result_codes;
+  const parts: string[] = [];
+
+  if (codes?.transaction) {
+    parts.push(codes.transaction);
+  }
+  if (codes?.operations?.length) {
+    parts.push(`ops: ${codes.operations.join(", ")}`);
+  }
+  if (base.detail) {
+    parts.push(base.detail);
+  } else if (base.title) {
+    parts.push(base.title);
+  } else if (base.error) {
+    parts.push(base.error);
+  }
+
+  const message =
+    parts.length > 0 ? `Horizon submission failed (${status}): ${parts.join(" | ")}` : `Horizon submission failed (${status}): ${fallback}`;
+
+  const error = new Error(message);
+  (error as Error & { status?: number }).status = status;
+  return error;
+};
+
+const submitSignedTransaction = async (serverUrl: string, signedTxXdr: string): Promise<string> => {
+  const endpoint = `${serverUrl.replace(/\/$/, "")}/transactions`;
+  const body = `tx=${encodeURIComponent(signedTxXdr)}`;
+
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded; charset=utf-8",
+      Accept: "application/json",
+    },
+    body,
+  });
+
+  const raw = await response.text();
+  let parsed: Record<string, unknown> | null = null;
+
+  if (raw) {
+    try {
+      parsed = JSON.parse(raw) as Record<string, unknown>;
+    } catch {
+      parsed = null;
+    }
+  }
+
+  if (!response.ok) {
+    throw buildHorizonError(response.status, parsed as HorizonSubmitFailure | null, raw || response.statusText || "Unknown error");
+  }
+
+  const payload = (parsed ?? {}) as HorizonSubmitSuccess;
+  return extractHorizonHash(payload);
+};
+
 export const buildAndSubmitMemoTx = async ({
-  secret,
+  account,
   destination,
   memoCid,
   networkPassphrase,
@@ -206,49 +256,44 @@ export const buildAndSubmitMemoTx = async ({
   amount,
 }: SubmitMemoTxArgs): Promise<{ txHash: string }> => {
   const stellar = await loadStellar();
-  const ServerCtor = stellar.Server as unknown as new (serverUrl: string) => StellarServerLike;
-  const TransactionBuilderCtor = stellar.TransactionBuilder as unknown as new (
-    account: Record<string, unknown>,
-    options: { fee: string; networkPassphrase: string },
-  ) => TransactionBuilderLike;
-  const operationFactory = stellar.Operation as unknown as OperationFactory;
-  const memoFactory = stellar.Memo as unknown as MemoFactory;
-  const keypairFactory = stellar.Keypair as unknown as KeypairFactory;
-  const assetFactory = stellar.Asset as unknown as AssetFactory;
+  const { Server, TransactionBuilder, Operation, Memo, Asset } = stellar as unknown as {
+    Server: new (url: string) => StellarServerLike;
+    TransactionBuilder: typeof import("stellar-sdk").TransactionBuilder;
+    Operation: typeof import("stellar-sdk").Operation;
+    Memo: typeof import("stellar-sdk").Memo;
+    Asset: typeof import("stellar-sdk").Asset;
+  };
+
   const horizonUrl = serverUrl.replace(/\/$/, "");
   if (!horizonUrl) {
     throw new Error("Horizon server URL is required to submit attestation transactions.");
   }
-
-  const trimmedSecret = secret.trim();
-  if (!trimmedSecret) {
-    throw new Error("Custodian secret key is required.");
+  const trimmedAccount = account.trim();
+  if (!trimmedAccount) {
+    throw new Error("Custodian account is required.");
   }
-
   const memoValue = memoCid.trim();
   if (!memoValue) {
     throw new Error("Attestation metadata CID is required.");
   }
 
-  const server = new ServerCtor(horizonUrl);
-  const signer = keypairFactory.fromSecret(trimmedSecret);
-  const account = await server.loadAccount(signer.publicKey());
+  const server = new Server(horizonUrl);
+  const sourceAccount = await server.loadAccount(trimmedAccount);
   const baseFee = await server.fetchBaseFee();
 
-  const encoder = new TextEncoder();
-  const memoBytes = encoder.encode(memoValue);
+  const encodedMemo = (typeof TextEncoder !== "undefined" ? new TextEncoder() : null)?.encode(memoValue) ?? Buffer.from(memoValue, "utf8");
   const memo =
-    memoBytes.byteLength <= 28 ? memoFactory.text(memoValue) : memoFactory.hash(await hashCidToHex(memoValue));
+    encodedMemo.length <= 28 ? Memo.text(memoValue) : Memo.hash(await hashCidToHex(memoValue));
 
-  const target = destination?.trim() || signer.publicKey();
-  const tx = new TransactionBuilderCtor(account, {
+  const target = destination?.trim() || trimmedAccount;
+  const tx = new TransactionBuilder(sourceAccount, {
     fee: baseFee.toString(),
     networkPassphrase,
   })
     .addOperation(
-      operationFactory.payment({
+      Operation.payment({
         destination: target,
-        asset: assetFactory.native(),
+        asset: Asset.native(),
         amount: amount ?? "0.0000001",
       }),
     )
@@ -256,7 +301,11 @@ export const buildAndSubmitMemoTx = async ({
     .setTimeout(60)
     .build();
 
-  tx.sign(signer);
-  const response = await server.submitTransaction(tx);
-  return { txHash: response.hash };
+  const { signedTxXdr } = await signTx(tx.toXDR(), {
+    networkPassphrase,
+    address: trimmedAccount,
+  });
+
+  const txHash = await submitSignedTransaction(horizonUrl, signedTxXdr);
+  return { txHash };
 };

@@ -10,6 +10,7 @@ import { TokenizeForm, type TokenizeFormHandle, type TokenizeFormValues } from "
 import { LivePreviewCard } from "@/src/components/tokenize/LivePreviewCard";
 import { SuccessMintModal } from "@/src/components/tokenize/SuccessMintModal";
 import type { MintResult } from "@/src/lib/types/proofs";
+import { CUSTODIAN_ACCOUNT } from "@/src/utils/constants";
 
 const initialFormValues: TokenizeFormValues = {
   assetType: "",
@@ -94,6 +95,8 @@ export default function TokenizePage() {
                 onChange={handleFormChange}
                 onMintSuccess={handleMintSuccess}
                 walletConnected={wallet.status === "connected"}
+                accountId={wallet.accountId}
+                custodianAccount={CUSTODIAN_ACCOUNT}
               />
             </div>
           </motion.section>

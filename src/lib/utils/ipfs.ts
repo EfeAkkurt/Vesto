@@ -1,5 +1,3 @@
-import type { ProofRef } from "@/src/lib/types/proofs";
-
 const DEFAULT_GATEWAY = "https://ipfs.io/ipfs/";
 
 type FormatResult = {
@@ -58,15 +56,4 @@ export const downloadFromGateway = async (url: string, name?: string): Promise<v
   anchor.click();
   anchor.remove();
   URL.revokeObjectURL(blobUrl);
-};
-
-
-const randomDelay = (min = 600, max = 900) => Math.floor(Math.random() * (max - min + 1)) + min;
-
-export const mockUpload = async (file: File): Promise<ProofRef> => {
-  await new Promise((resolve) => setTimeout(resolve, randomDelay()));
-  const base = `${file.name}-${file.size}-${Date.now().toString(36)}`;
-  const hash = `Qm${base.replace(/[^a-zA-Z0-9]/g, "").slice(0, 44)}`;
-  const { url } = formatIpfs(hash);
-  return { hash, url, size: file.size, mime: file.type || "application/octet-stream" };
 };

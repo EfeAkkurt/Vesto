@@ -15,8 +15,10 @@ import { useToast } from "@/src/components/ui/Toast";
 import { Loader } from "@/src/components/ui/Loader";
 import { CopyHash } from "@/src/components/ui/CopyHash";
 import { maskPercent } from "@/src/lib/utils/format";
-import { mockUpload } from "@/src/lib/utils/ipfs";
+import { uploadFile, putDagCbor, getViaGateway } from "@/src/lib/ipfs/client";
 import type { AssetType, MintResult, ProofRef } from "@/src/lib/types/proofs";
+import { buildAndSubmitMemoTx } from "@/src/lib/custodian/attestation";
+import { CUSTODIAN_ACCOUNT, HORIZON, STELLAR_NET } from "@/src/utils/constants";
 
 export type TokenizeFormValues = {
   assetType: AssetType | "";
@@ -36,11 +38,21 @@ type TokenizeFormProps = {
   onChange: (next: Partial<TokenizeFormValues>) => void;
   onMintSuccess: (result: MintResult) => void;
   walletConnected: boolean;
+  accountId?: string;
+  custodianAccount?: string;
 };
 
 type FormErrors = Partial<Record<"assetType" | "assetName" | "assetValueUSD" | "expectedYieldPct" | "proof", string>>;
 
 const assetTypeOptions: AssetType[] = ["Invoice", "Subscription", "Rent", "Carbon Credit"];
+
+const NETWORK_PASSPHRASES = {
+  MAINNET: "Public Global Stellar Network ; September 2015",
+  TESTNET: "Test SDF Network ; September 2015",
+} as const;
+
+const getNetworkPassphrase = () =>
+  STELLAR_NET?.toUpperCase() === "MAINNET" ? NETWORK_PASSPHRASES.MAINNET : NETWORK_PASSPHRASES.TESTNET;
 
 const fieldVariants = {
   hidden: { opacity: 0, y: 8 },
@@ -57,7 +69,7 @@ const randomTokenId = () => `vRWA-${Math.floor(Math.random() * 1_000_000)
   .padStart(6, "0")}`;
 
 export const TokenizeForm = forwardRef<TokenizeFormHandle, TokenizeFormProps>(
-  ({ values, onChange, onMintSuccess, walletConnected }, ref) => {
+  ({ values, onChange, onMintSuccess, walletConnected, accountId, custodianAccount }, ref) => {
     const prefersReducedMotion = useReducedMotion();
     const { toast } = useToast();
     const [errors, setErrors] = useState<FormErrors>({});
@@ -120,13 +132,20 @@ export const TokenizeForm = forwardRef<TokenizeFormHandle, TokenizeFormProps>(
       if (!file) return;
       try {
         setIsUploading(true);
-        const proof = await mockUpload(file);
+        const cid = await uploadFile(file);
+        const proof: ProofRef = {
+          hash: cid,
+          url: getViaGateway(cid),
+          size: file.size,
+          mime: file.type || "application/octet-stream",
+          name: file.name,
+        };
         onChange({ proof });
         clearError("proof");
         toast({
-          title: "Proof staged",
-          description: `${file.name} uploaded to mock gateway`,
-          variant: "info",
+          title: "Proof uploaded",
+          description: `${file.name} pinned to IPFS (${cid.slice(0, 8)}…)`,
+          variant: "success",
         });
       } catch (error) {
         console.error("Failed to upload proof", error);
@@ -167,16 +186,67 @@ export const TokenizeForm = forwardRef<TokenizeFormHandle, TokenizeFormProps>(
         return;
       }
 
+      if (!walletConnected || !accountId) {
+        toast({
+          title: "Connect wallet",
+          description: "Freighter must be connected to submit on-chain requests.",
+          variant: "warning",
+        });
+        return;
+      }
+
+      const targetCustodian = (custodianAccount ?? CUSTODIAN_ACCOUNT)?.trim();
+      if (!targetCustodian) {
+        toast({
+          title: "Missing custodian",
+          description: "Custodian account is not configured. Set NEXT_PUBLIC_CUSTODIAN_ACCOUNT.",
+          variant: "error",
+        });
+        return;
+      }
+
       setIsSubmitting(true);
       try {
-        // Simulate short delay to indicate processing.
-        await new Promise((resolve) => setTimeout(resolve, 650));
+        const timestamp = new Date().toISOString();
+        const expectedYield =
+          values.expectedYieldPct.trim() !== ""
+            ? Number.parseFloat(values.expectedYieldPct.replace(/[^0-9.]/g, ""))
+            : undefined;
+        const requestEnvelope = {
+          schema: "vesto.token.request@1",
+          asset: {
+            type: values.assetType,
+            name: values.assetName.trim(),
+            valueUSD: numericValue,
+            expectedYieldPct: expectedYield,
+          },
+          proofCid: values.proof.hash,
+          proofUrl: values.proof.url,
+          issuer: accountId,
+          timestamp,
+        };
+
+        const metadataCid = await putDagCbor(requestEnvelope);
+
+        const { txHash } = await buildAndSubmitMemoTx({
+          account: accountId,
+          destination: targetCustodian,
+          memoCid: metadataCid,
+          serverUrl: HORIZON,
+          networkPassphrase: getNetworkPassphrase(),
+          amount: "0.0000001",
+        });
+
         const result: MintResult = {
           tokenId: randomTokenId(),
           supply: numericValue,
           proof: values.proof,
+          metadataCid,
+          txHash,
+          destination: targetCustodian,
+          requestCid: metadataCid,
         };
-        toast({ title: "Token minted", description: `${values.assetName} is live on Stellar.`, variant: "success" });
+        toast({ title: "Request sent", description: `${values.assetName} posted to Horizon for custodian review.`, variant: "success" });
         onMintSuccess(result);
       } catch (error) {
         console.error("Mint simulation failed", error);
@@ -195,9 +265,9 @@ export const TokenizeForm = forwardRef<TokenizeFormHandle, TokenizeFormProps>(
           transition: { duration: 0.2, ease: [0.33, 1, 0.68, 1] as const },
         };
 
-    const disableSubmit = !walletConnected || isSubmitting || isUploading;
+    const disableSubmit = !walletConnected || !accountId || isSubmitting || isUploading;
 
-    const selectedFileName = useMemo(() => values.proof?.hash ?? null, [values.proof]);
+    const selectedFileName = useMemo(() => values.proof?.name ?? values.proof?.hash ?? null, [values.proof]);
 
     return (
       <motion.form onSubmit={handleSubmit} className="space-y-6">
@@ -302,7 +372,11 @@ export const TokenizeForm = forwardRef<TokenizeFormHandle, TokenizeFormProps>(
           className="flex w-full items-center justify-center gap-2 rounded-lg bg-primary px-4 py-3 text-sm font-semibold text-primary-foreground transition hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
         >
           {isSubmitting ? <Loader size="sm" /> : null}
-          {walletConnected ? (isSubmitting ? "Minting token" : "Mint Token") : "Connect Wallet First"}
+          {!walletConnected || !accountId
+            ? "Connect Wallet First"
+            : isSubmitting
+              ? "Submitting Request"
+              : "Submit Token Request"}
         </motion.button>
       </motion.form>
     );

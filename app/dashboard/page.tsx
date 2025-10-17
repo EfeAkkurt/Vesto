@@ -14,6 +14,7 @@ import { useWallet } from "@/src/hooks/useWallet";
 import { useAccount, useAccountEffects, useAccountPayments } from "@/src/hooks/horizon";
 import { useAttestations } from "@/src/hooks/useAttestations";
 import { useNetworkHealth } from "@/src/hooks/useNetworkHealth";
+import { useAssetSupply } from "@/src/hooks/useAssetSupply";
 import {
   buildMetrics,
   buildPayoutSchedule,
@@ -22,37 +23,41 @@ import {
   deriveKpi,
 } from "@/src/lib/dashboard/transformers";
 import { stagger } from "@/src/components/motion/presets";
+import { CUSTODIAN_ACCOUNT, TOKEN_ASSET_CODE, TOKEN_ASSET_ISSUER } from "@/src/utils/constants";
 
 const DashboardPage = () => {
   const wallet = useWallet();
   const networkHealth = useNetworkHealth();
   const prefersReducedMotion = useReducedMotion();
-  const accountId = wallet.accountId;
+  const overviewAccountId = wallet.accountId ?? (CUSTODIAN_ACCOUNT || undefined);
 
   const {
     data: account,
     isLoading: accountLoading,
-  } = useAccount(accountId);
+  } = useAccount(overviewAccountId);
 
   const {
     data: payments,
     isLoading: paymentsLoading,
     error: paymentsError,
-  } = useAccountPayments(accountId);
+  } = useAccountPayments(overviewAccountId);
 
   const {
     data: effects,
     isLoading: effectsLoading,
-  } = useAccountEffects(accountId);
+  } = useAccountEffects(overviewAccountId);
 
-  const attestationState = useAttestations(accountId, payments, effects);
+  const attestationState = useAttestations(overviewAccountId, payments, effects);
+
+  const assetSupply = useAssetSupply(TOKEN_ASSET_CODE, TOKEN_ASSET_ISSUER);
+  const mintedSupply = assetSupply.data;
 
   const holdingsData = useMemo(
-    () => (wallet.connected && account ? deriveHoldings(account) : []),
-    [wallet.connected, account],
+    () => (account ? deriveHoldings(account) : []),
+    [account],
   );
 
-  const kpi = useMemo(() => deriveKpi(wallet.connected ? account : undefined), [wallet.connected, account]);
+  const kpi = useMemo(() => deriveKpi(account, mintedSupply), [account, mintedSupply]);
   const metrics = useMemo(() => buildMetrics(kpi), [kpi]);
 
   const reservePointsData = useMemo(
@@ -68,16 +73,14 @@ const DashboardPage = () => {
   const effectiveWallet = useMemo(
     () => ({
       ...wallet,
-      balanceUSD: wallet.connected && account ? kpi.portfolioUSD : wallet.balanceUSD,
+      balanceUSD: account ? kpi.portfolioUSD : wallet.balanceUSD,
     }),
     [wallet, account, kpi.portfolioUSD],
   );
 
-  const isWalletIdle = !wallet.connected;
-  const isPaymentsLoading = isWalletIdle || paymentsLoading;
-  const isAccountLoading = isWalletIdle || accountLoading;
-  const isAttestationLoading =
-    isWalletIdle || attestationState.isLoading || effectsLoading || paymentsLoading;
+  const isAccountLoading = accountLoading;
+  const isPaymentsLoading = paymentsLoading;
+  const isAttestationLoading = attestationState.isLoading || effectsLoading || paymentsLoading;
 
   return (
     <LayoutShell wallet={effectiveWallet} networkHealth={networkHealth}>

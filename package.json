@@ -9,6 +9,7 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@lighthouse-web3/sdk": "^0.4.3",
     "@noble/hashes": "^1.8.0",
     "@stellar/freighter-api": "^5.0.0",
     "cborg": "^4.2.18",

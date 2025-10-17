@@ -75,6 +75,22 @@ export const SubmissionModal = ({ open, onClose, attestation }: SubmissionModalP
                   </a>
                 </div>
               </div>
+              {attestation.requestCid ? (
+                <div>
+                  <p className="text-xs uppercase tracking-wide text-muted-foreground">Request CID</p>
+                  <div className="mt-1 flex items-center gap-2">
+                    <CopyHash value={attestation.requestCid} />
+                    <a
+                      href={`https://ipfs.io/ipfs/${attestation.requestCid}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-xs text-primary hover:underline"
+                    >
+                      View Token Request
+                    </a>
+                  </div>
+                </div>
+              ) : null}
               <div>
                 <p className="text-xs uppercase tracking-wide text-muted-foreground">Proof file</p>
                 <div className="mt-1 flex items-center gap-2">

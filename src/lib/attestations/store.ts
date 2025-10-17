@@ -1,26 +1,34 @@
 import { Buffer } from "buffer";
-import { CID } from "multiformats/cid";
 import { z } from "zod";
-import { canonicalizeToCbor, verifyEd25519 } from "@/src/lib/custodian/attestation";
+import { serializeAttestationMessage, verifyEd25519 } from "@/src/lib/custodian/attestation";
 import { AttestationMetadataSchema } from "@/src/lib/custodian/schema";
 import type { HorizonEffect, HorizonPayment } from "@/src/hooks/horizon";
 import type { Attestation } from "@/src/lib/types/proofs";
-import { IPFS_ENDPOINT } from "@/src/utils/constants";
+import { IPFS_GATEWAY } from "@/src/utils/constants";
 import { rawPublicKeyFromAddress } from "@/src/lib/stellar/keys";
+import { extractMemoCid } from "@/src/lib/horizon/memos";
 
-const ipfsBase = IPFS_ENDPOINT.replace(/\/$/, "");
+const ipfsBase = IPFS_GATEWAY.replace(/\/$/, "");
 
 const MetadataEnvelopeExtrasSchema = z.object({
   nonce: z.string().optional(),
   signature: z.string().optional(),
   publicKey: z.string().optional(),
   signedBy: z.string().optional(),
+  requestCid: z.string().optional(),
+  request: z
+    .object({
+      cid: z.string().min(1),
+    })
+    .optional(),
   attestation: z
     .object({
       nonce: z.string().optional(),
       signature: z.string().optional(),
       publicKey: z.string().optional(),
       signedBy: z.string().optional(),
+      requestCid: z.string().optional(),
+      message: z.string().optional(),
     })
     .optional(),
 });
@@ -93,6 +101,7 @@ type SignatureBundle = {
   signatureBytes?: Uint8Array;
   publicKey?: string;
   nonce?: string;
+  requestCid?: string;
 };
 
 const decodeSignature = (value: string): Uint8Array | null => {
@@ -139,6 +148,7 @@ const extractEffectEnvelope = (
               ? parsed.signedBy
               : undefined,
         nonce: typeof parsed.nonce === "string" ? parsed.nonce : undefined,
+        requestCid: typeof parsed.requestCid === "string" ? parsed.requestCid : undefined,
       };
     } catch {
       continue;
@@ -175,6 +185,8 @@ const deriveSignatureBundle = (
   const signatureString = effectBundle.signatureString ?? signatureCandidate;
   const publicKey = effectBundle.publicKey ?? publicKeyCandidate ?? metadata.issuer;
   const nonce = effectBundle.nonce ?? nonceCandidate;
+  const requestCid =
+    effectBundle.requestCid ?? attestationExtras.requestCid ?? extras.requestCid ?? extras.request?.cid ?? undefined;
 
   const signatureBytes = signatureString ? decodeSignature(signatureString) ?? undefined : undefined;
 
@@ -183,6 +195,7 @@ const deriveSignatureBundle = (
     signatureBytes,
     publicKey: publicKey ?? undefined,
     nonce: nonce ?? undefined,
+    requestCid,
   };
 };
 
@@ -201,9 +214,9 @@ const determineStatus = async (
       timestamp: metadata.timestamp,
       nonce: bundle.nonce,
     };
-    const messageBytes = canonicalizeToCbor(message);
+    const { textBytes } = serializeAttestationMessage(message);
     const publicKeyRaw = rawPublicKeyFromAddress(bundle.publicKey);
-    const verified = await verifyEd25519(publicKeyRaw, messageBytes, bundle.signatureBytes);
+    const verified = await verifyEd25519(publicKeyRaw, textBytes, bundle.signatureBytes);
     return verified ? "Verified" : "Invalid";
   } catch {
     return "Invalid";
@@ -248,39 +261,8 @@ const buildAttestation = async (
       status,
       ts: envelope.metadata.timestamp,
       txHash: candidate.payment.transaction_hash,
+      requestCid: bundle.requestCid,
     } satisfies Attestation;
-  } catch {
-    return null;
-  }
-};
-
-const extractMemoCid = (payment: HorizonPayment): string | null => {
-  const directMemo = payment.memo?.trim();
-  if (directMemo) {
-    try {
-      CID.parse(directMemo);
-      return directMemo;
-    } catch {
-      return null;
-    }
-  }
-
-  const attrMemo = payment.transaction_attr?.memo?.trim();
-  if (!attrMemo) return null;
-
-  if (payment.transaction_attr?.memo_type && payment.transaction_attr.memo_type !== "text") {
-    try {
-      const bytes = Buffer.from(attrMemo, "base64");
-      const cid = CID.decode(bytes).toString();
-      return cid;
-    } catch {
-      return null;
-    }
-  }
-
-  try {
-    CID.parse(attrMemo);
-    return attrMemo;
   } catch {
     return null;
   }
