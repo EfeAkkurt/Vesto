@@ -8,15 +8,18 @@ export interface ProofRef {
   name?: string;
 }
 
-export type ProofType =
-  | "Audit Report"
-  | "Insurance Policy"
-  | "Legal Agreement"
-  | "Ownership"
-  | "Appraisal"
-  | "Other";
+export const PROOF_TYPE_OPTIONS = [
+  "Audit Report",
+  "Insurance Policy",
+  "Legal Agreement",
+  "Ownership",
+  "Appraisal",
+  "Other",
+] as const;
 
-export type ProofStatus = "Verified" | "Pending" | "Rejected";
+export type ProofType = (typeof PROOF_TYPE_OPTIONS)[number];
+
+export type ProofStatus = "Verified" | "Pending" | "Invalid";
 
 export interface ProofItem {
   id: string;

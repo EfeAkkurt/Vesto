@@ -9,13 +9,15 @@ import { downloadFromGateway, openInGateway } from "@/src/lib/utils/ipfs";
 export type ProofRowActionsProps = {
   url: string;
   hash: string;
+  fileName?: string;
 };
 
-export const ProofRowActions = ({ url, hash }: ProofRowActionsProps) => {
+export const ProofRowActions = ({ url, hash, fileName }: ProofRowActionsProps) => {
   const { toast } = useToast();
   const [downloading, setDownloading] = useState(false);
 
   const handleView = () => {
+    if (!url) return;
     openInGateway(url);
     toast({
       title: "Opening proof",
@@ -27,8 +29,9 @@ export const ProofRowActions = ({ url, hash }: ProofRowActionsProps) => {
 
   const handleDownload = async () => {
     try {
+      if (!url) return;
       setDownloading(true);
-      await downloadFromGateway(url, `${hash.slice(0, 8)}.pdf`);
+      await downloadFromGateway(url, fileName ?? `${hash.slice(0, 8)}.bin`);
       toast({
         title: "Download started",
         description: "Your proof is downloading",
@@ -51,7 +54,8 @@ export const ProofRowActions = ({ url, hash }: ProofRowActionsProps) => {
       <button
         type="button"
         onClick={handleView}
-        className="inline-flex items-center gap-1 rounded-full border border-border/50 bg-background/40 px-3 py-1 text-xs font-semibold text-foreground transition hover:border-primary/50 hover:text-primary"
+        disabled={!url}
+        className="inline-flex items-center gap-1 rounded-full border border-border/50 bg-background/40 px-3 py-1 text-xs font-semibold text-foreground transition hover:border-primary/50 hover:text-primary disabled:opacity-60"
       >
         <svg className="size-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3">
           <path d="M3 8s2.5-4 5-4 5 4 5 4-2.5 4-5 4-5-4-5-4z" />
@@ -62,7 +66,7 @@ export const ProofRowActions = ({ url, hash }: ProofRowActionsProps) => {
       <button
         type="button"
         onClick={handleDownload}
-        disabled={downloading}
+        disabled={downloading || !url}
         className="inline-flex items-center gap-2 rounded-full border border-border/50 bg-background/40 px-3 py-1 text-xs font-semibold text-foreground transition hover:border-primary/50 hover:text-primary disabled:opacity-60"
       >
         {downloading ? <Loader size="sm" /> : (

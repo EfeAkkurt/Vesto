@@ -137,3 +137,28 @@ export const parseAmountToStroops = (value?: string | number): number => {
   if (!Number.isFinite(numeric)) return 0;
   return Math.round(numeric * 10_000_000);
 };
+
+const RELATIVE_TIME_FORMATTER = new Intl.RelativeTimeFormat("en", { numeric: "auto" });
+const RELATIVE_TIME_DIVISIONS: Array<[number, Intl.RelativeTimeFormatUnit]> = [
+  [60, "second"],
+  [60, "minute"],
+  [24, "hour"],
+  [7, "day"],
+  [4.34524, "week"],
+  [12, "month"],
+  [Number.POSITIVE_INFINITY, "year"],
+];
+
+export const formatRelativeTime = (iso: string): string => {
+  if (!iso) return "—";
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "—";
+  let duration = (date.getTime() - Date.now()) / 1000;
+  for (const [divisor, unit] of RELATIVE_TIME_DIVISIONS) {
+    if (Math.abs(duration) < divisor) {
+      return RELATIVE_TIME_FORMATTER.format(Math.round(duration), unit);
+    }
+    duration /= divisor;
+  }
+  return RELATIVE_TIME_FORMATTER.format(0, "second");
+};

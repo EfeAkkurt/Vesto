@@ -3,9 +3,9 @@ export const ProofsEmpty = () => (
     <span className="text-4xl" role="img" aria-label="No proofs">
       📄
     </span>
-    <h3 className="mt-4 text-lg font-semibold text-foreground">No proofs yet</h3>
+    <h3 className="mt-4 text-lg font-semibold text-foreground">No proofs yet — upload your first document above.</h3>
     <p className="mt-2 max-w-sm text-sm text-muted-foreground">
-      Upload documents using the panel on the left to kick off your verification workflow.
+      Once your custodian reviews a submission, the status will update automatically from Pending to Verified.
     </p>
   </div>
 );
