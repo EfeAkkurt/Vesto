@@ -95,6 +95,27 @@ export const pluralize = (value: number, unit: string): string =>
 
 export const formatCurrency = (value: number, options?: FormatUSDOptions) => formatUSD(value, options);
 
+export const formatXlm = (value: number | string): string => {
+  const numeric =
+    typeof value === "string"
+      ? Number.parseFloat(value)
+      : value;
+
+  if (!Number.isFinite(numeric) || numeric === 0) {
+    return "0 XLM";
+  }
+
+  if (numeric > 0 && numeric < 0.000001) {
+    return "≤ 0.000001 XLM";
+  }
+
+  const formatted = new Intl.NumberFormat("en-US", {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 6,
+  }).format(numeric);
+
+  return `${formatted} XLM`;
+};
 
 export const maskPercent = (value: string): string => {
   if (value === undefined || value === null) return "";
@@ -108,4 +129,11 @@ export const maskPercent = (value: string): string => {
   const clamped = Math.min(Math.max(parsed, 0), 100);
   const fixed = clamped.toFixed(2);
   return fixed.replace(/\.00$/, "").replace(/(\.\d)0$/, "$1");
+};
+
+export const parseAmountToStroops = (value?: string | number): number => {
+  if (value === undefined || value === null) return 0;
+  const numeric = typeof value === "string" ? Number.parseFloat(value) : value;
+  if (!Number.isFinite(numeric)) return 0;
+  return Math.round(numeric * 10_000_000);
 };

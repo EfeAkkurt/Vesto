@@ -48,16 +48,13 @@ export const UploadAttestation = ({ accountId, connected, preferredDestination, 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [stage, setStage] = useState<SubmissionStage>("idle");
 
-  const requestCid = request?.cid ?? request?.metadataCid;
+  const requestCid = request?.memo.kind === "cid" ? request.memo.value : undefined;
 
   useEffect(() => {
     if (!request) return;
     if (!reserveUSD || reserveUSD === "0" || reserveUSD === "") {
-      const value = Number.isFinite(request.valueUSD ?? NaN)
-        ? request.valueUSD
-        : Number.isFinite(request.metadata?.asset.valueUSD ?? NaN)
-          ? request.metadata?.asset.valueUSD
-          : undefined;
+      const metaValue = request?.meta?.valueUsd;
+      const value = Number.isFinite(metaValue ?? NaN) ? metaValue : undefined;
       if (value != null) {
         setReserveUSD(String(value));
       }
@@ -158,19 +155,13 @@ export const UploadAttestation = ({ accountId, connected, preferredDestination, 
         request: requestCid
           ? {
               cid: requestCid,
-              asset: request?.metadata
+              asset: request?.meta
                 ? {
-                    type: request.metadata.asset.type,
-                    name: request.metadata.asset.name,
-                    valueUSD: request.metadata.asset.valueUSD,
+                    type: request.meta.type ?? "Unknown",
+                    name: request.meta.name ?? "Tokenized Asset",
+                    valueUSD: request.meta.valueUsd ?? value ?? 0,
                   }
-                : request?.assetType && request?.assetName && Number.isFinite(request?.valueUSD ?? NaN)
-                  ? {
-                      type: request.assetType,
-                      name: request.assetName ?? "Unknown asset",
-                      valueUSD: request.valueUSD ?? 0,
-                    }
-                  : undefined,
+                : undefined,
             }
           : undefined,
       };
@@ -235,20 +226,22 @@ export const UploadAttestation = ({ accountId, connected, preferredDestination, 
               <p className="mt-1 break-all font-mono text-[11px]">{requestCid}</p>
               {request ? (
                 <div className="mt-2 space-y-1 text-[11px] text-primary/80">
-                  {request.assetName ? (
+                  {request.meta?.name ? (
                     <p>
-                      {request.assetName} · {request.assetType ?? "Asset"}
+                      {request.meta.name} · {request.meta.type ?? "Asset"}
                     </p>
                   ) : (
-                    <p>Hash reference · {request.memoHashHex?.slice(0, 12) ?? request.txHash.slice(0, 12)}…</p>
+                    <p>
+                      Hash reference · {(request.memo.kind === "hash" ? request.memo.value.slice(0, 12) : request.txHash.slice(0, 12))}…
+                    </p>
                   )}
-                  {Number.isFinite(request.valueUSD ?? NaN) ? (
+                  {Number.isFinite(request.meta?.valueUsd ?? NaN) ? (
                     <p>
-                      ≈ {request.valueUSD?.toLocaleString()} USD · Proof {request.proofCid?.slice(0, 6) ?? "—"}…
+                      ≈ {request.meta?.valueUsd?.toLocaleString()} USD · Proof {request.meta?.proofCid?.slice(0, 6) ?? "—"}…
                     </p>
                   ) : (
                     <p>
-                      {request.amount} {request.assetCode} · From {request.from.slice(0, 6)}…
+                      {request.amount} XLM · From {request.from.slice(0, 6)}…
                     </p>
                   )}
                 </div>
@@ -263,15 +256,15 @@ export const UploadAttestation = ({ accountId, connected, preferredDestination, 
             </button>
           </div>
         </div>
-      ) : request?.memoHashHex ? (
+      ) : request?.memo.kind === "hash" ? (
         <div className="rounded-xl border border-primary/40 bg-primary/10 p-3 text-xs text-primary">
           <div className="flex items-start justify-between gap-3">
             <div>
               <p className="font-semibold">Responding to hash-only reference</p>
-              <p className="mt-1 break-all font-mono text-[11px]">{request.memoHashHex}</p>
+              <p className="mt-1 break-all font-mono text-[11px]">{request.memo.value}</p>
               <div className="mt-2 space-y-1 text-[11px] text-primary/80">
                 <p>
-                  {request.amount} {request.assetCode} received from {request.from.slice(0, 6)}…
+                  {request.amount} XLM received from {request.from.slice(0, 6)}…
                 </p>
                 <p>Attach attestation referencing this memo hash.</p>
               </div>

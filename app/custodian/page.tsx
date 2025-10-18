@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { motion, useReducedMotion } from "framer-motion";
 import { transitions, fadeInUp } from "@/src/components/motion/presets";
 import { LayoutShell } from "@/src/components/layout/LayoutShell";
@@ -13,13 +13,16 @@ import { AttestationTimeline } from "@/src/components/custodian/AttestationTimel
 import { AttestationDrawer } from "@/src/components/custodian/AttestationDrawer";
 import { SubmissionModal } from "@/src/components/custodian/SubmissionModal";
 import type { Attestation } from "@/src/lib/types/proofs";
-import { formatUSD, formatDate } from "@/src/lib/utils/format";
+import { formatUSD, formatDateTime, formatXlm } from "@/src/lib/utils/format";
 import { useAccountPayments, useAccountEffects } from "@/src/hooks/horizon";
 import { useAttestations } from "@/src/hooks/useAttestations";
 import { useTokenizationRequests } from "@/src/hooks/useTokenizationRequests";
 import type { TokenizationRequest } from "@/src/lib/custodian/requests";
-import { CUSTODIAN_ACCOUNT } from "@/src/utils/constants";
+import { CUSTODIAN_ACCOUNT, HORIZON, STELLAR_NET } from "@/src/utils/constants";
 import { CopyHash } from "@/src/components/ui/CopyHash";
+import { StellarExpertWidgetDialog } from "@/src/components/stellar/StellarExpertWidgetDialog";
+import { resolveExpertNetwork } from "@/src/lib/stellar/expert";
+import { getViaGateway } from "@/src/lib/ipfs/client";
 
 type RequestStatus = "pending" | "approved" | "rejected";
 
@@ -40,13 +43,24 @@ const REQUEST_STATUS_LABEL: Record<RequestStatus, string> = {
   rejected: "Invalid",
 };
 
-const assetTypeOptions = ["All", "Invoice", "Subscription", "Rent", "Carbon Credit"] as const;
+const assetTypeOptions = ["All", "Invoice", "Subscription", "Rent", "Carbon Credit", "Unknown"] as const;
 
 type AssetTypeFilter = (typeof assetTypeOptions)[number];
+
+const MEMO_BADGES: Record<"cid" | "hash", { label: string; className: string }> = {
+  cid: { label: "CID", className: "bg-lime-400/20 text-lime-200" },
+  hash: { label: "HASH-ONLY", className: "bg-amber-400/20 text-amber-200" },
+};
 
 const statusFilterOptions: Array<RequestStatus | "all"> = ["pending", "approved", "rejected", "all"];
 
 const EMPTY_REQUESTS_HELPER = "No tokenization requests match the current filters.";
+
+const maskAccountId = (value?: string) => {
+  if (!value) return "";
+  if (value.length <= 10) return value;
+  return `${value.slice(0, 5)}…${value.slice(-4)}`;
+};
 
 const CustodianPage = () => {
   const wallet = useWallet();
@@ -62,15 +76,24 @@ const CustodianPage = () => {
   const attestations = useMemo(() => attestationState.data ?? [], [attestationState.data]);
 
   const {
-    requests: rawRequests,
+    items: rawRequests,
+    diagnostics,
     isLoading: requestsLoading,
-    mutate: refreshRequests,
-  } = useTokenizationRequests(custodianAccount, 60);
+    error: requestsError,
+    rescan,
+  } = useTokenizationRequests(custodianAccount);
 
   const [typeFilter, setTypeFilter] = useState<AssetTypeFilter>("All");
   const [statusFilter, setStatusFilter] = useState<RequestStatus | "all">("pending");
   const [searchTerm, setSearchTerm] = useState("");
   const [dateFilter, setDateFilter] = useState("");
+  const [expertTxHash, setExpertTxHash] = useState<string | null>(null);
+  const [expertDialogOpen, setExpertDialogOpen] = useState(false);
+  const expertNetwork = resolveExpertNetwork(STELLAR_NET);
+  const expertExplorerBase =
+    expertNetwork === "PUBLIC"
+      ? "https://stellar.expert/explorer/public/tx/"
+      : "https://stellar.expert/explorer/testnet/tx/";
 
   const attestationByRequestCid = useMemo(() => {
     const map = new Map<string, Attestation>();
@@ -84,7 +107,7 @@ const CustodianPage = () => {
 
   const enrichedRequests = useMemo<EnrichedRequest[]>(() => {
     return rawRequests.map((request) => {
-      const att = request.cid ? attestationByRequestCid.get(request.cid) : undefined;
+      const att = request.memo.kind === "cid" ? attestationByRequestCid.get(request.memo.value) : undefined;
       let status: RequestStatus = "pending";
       if (att) {
         status = att.status === "Verified" ? "approved" : att.status === "Invalid" ? "rejected" : "pending";
@@ -97,10 +120,16 @@ const CustodianPage = () => {
     });
   }, [attestationByRequestCid, rawRequests]);
 
+  useEffect(() => {
+    if (process.env.NODE_ENV !== "production") {
+      console.debug("[custodian:ui] items", enrichedRequests.length);
+    }
+  }, [enrichedRequests.length]);
+
   const filteredRequests = useMemo(() => {
     const query = searchTerm.trim().toLowerCase();
     return enrichedRequests.filter((request) => {
-      const metadataType = request.assetType ?? "Unknown";
+      const metadataType = request.meta?.type ?? "Unknown";
       if (typeFilter !== "All" && metadataType !== typeFilter) {
         return false;
       }
@@ -108,16 +137,15 @@ const CustodianPage = () => {
         return false;
       }
       if (dateFilter) {
-        const submitted = request.submittedAt ?? request.ts;
-        const sameDay = submitted ? submitted.slice(0, 10) === dateFilter : false;
+        const sameDay = request.createdAt.slice(0, 10) === dateFilter;
         if (!sameDay) return false;
       }
       if (!query) return true;
       const candidates: Array<string | undefined> = [
-        request.assetName,
-        request.metadataCid ?? request.cid,
-        request.proofCid,
-        request.memoHashHex,
+        request.meta?.name,
+        request.memo.kind === "cid" ? request.memo.value : undefined,
+        request.meta?.proofCid,
+        request.memo.kind === "hash" ? request.memo.value : undefined,
         request.txHash,
         request.from,
       ];
@@ -126,11 +154,14 @@ const CustodianPage = () => {
   }, [dateFilter, enrichedRequests, searchTerm, statusFilter, typeFilter]);
 
   const pendingCount = enrichedRequests.filter((request) => request.status === "pending").length;
+  const totalRequests = enrichedRequests.length;
 
   const [selectedRequest, setSelectedRequest] = useState<EnrichedRequest | null>(null);
   const [selectedAttestation, setSelectedAttestation] = useState<Attestation | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [submission, setSubmission] = useState<Attestation | null>(null);
+  const [debugOpen, setDebugOpen] = useState(false);
+  const [peekOpen, setPeekOpen] = useState(false);
 
   const handleAttestationOpen = (attestation: Attestation) => {
     setSelectedAttestation(attestation);
@@ -148,7 +179,7 @@ const CustodianPage = () => {
     const refreshers = [
       paymentsResponse.mutate?.(),
       effectsResponse.mutate?.(),
-      refreshRequests ? refreshRequests() : undefined,
+      rescan(),
     ].filter(Boolean) as Promise<unknown>[];
     if (refreshers.length) {
       await Promise.all(refreshers);
@@ -156,6 +187,30 @@ const CustodianPage = () => {
   };
 
   const walletAddress = custodianAccount;
+  useEffect(() => {
+    if (!debugOpen) {
+      setPeekOpen(false);
+    }
+  }, [debugOpen]);
+
+  const dropReasonEntries = useMemo(
+    () =>
+      Object.entries(diagnostics.droppedByReason)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 5),
+    [diagnostics.droppedByReason],
+  );
+  const memoTypeSummary = `${diagnostics.memoTypes.cid} CID / ${diagnostics.memoTypes.hash} HASH`;
+  const lastQueryDisplay = diagnostics.timestamp
+    ? new Date(diagnostics.timestamp).toLocaleString()
+    : "—";
+  const maskedCustodian = maskAccountId(diagnostics.account);
+  const debugSamples = diagnostics.samples.slice(0, 5);
+  const requestsErrorMessage = requestsError
+    ? requestsError instanceof Error
+      ? requestsError.message
+      : String(requestsError)
+    : "";
 
   return (
     <LayoutShell wallet={wallet} networkHealth={networkHealth}>
@@ -195,18 +250,27 @@ const CustodianPage = () => {
                   </button>
                 ))}
               </div>
-              <div className="flex items-center gap-3">
-                <span className="text-xs text-muted-foreground">
-                  Tracking {enrichedRequests.length} on-chain request{enrichedRequests.length === 1 ? "" : "s"}
-                </span>
+              <div className="flex flex-wrap items-center gap-3">
+                {totalRequests > 0 ? (
+                  <span className="text-xs text-muted-foreground">
+                    Tracking {totalRequests} on-chain request{totalRequests === 1 ? "" : "s"}
+                  </span>
+                ) : null}
                 <button
                   type="button"
                   onClick={() => {
-                    void refreshRequests?.();
+                    void rescan();
                   }}
                   className="rounded-full border border-border/50 px-3 py-1 text-xs font-medium text-foreground transition hover:border-primary/60 hover:text-primary"
                 >
                   Rescan
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDebugOpen((prev) => !prev)}
+                  className="rounded-full border border-border/50 px-3 py-1 text-xs font-medium text-foreground transition hover:border-primary/60 hover:text-primary"
+                >
+                  {debugOpen ? "Hide Debug" : "Show Debug"}
                 </button>
               </div>
             </div>
@@ -247,6 +311,73 @@ const CustodianPage = () => {
               </div>
             </div>
 
+            {requestsError ? (
+              <p className="mt-4 rounded-lg border border-rose-400/40 bg-rose-500/10 px-3 py-2 text-xs text-rose-200">
+                Failed to refresh custodian requests ({requestsErrorMessage || "unknown error"}). Please rescan or try again shortly.
+              </p>
+            ) : null}
+
+            {debugOpen ? (
+              <div className="mt-4 space-y-3 rounded-xl border border-border/50 bg-background/40 p-4 text-xs text-muted-foreground">
+                <div className="flex flex-wrap items-center gap-3 text-[11px]">
+                  <span>Custodian: {maskedCustodian || "—"}</span>
+                  <span>Network: {STELLAR_NET}</span>
+                  <span>Horizon: {HORIZON}</span>
+                  <span>Limit: {diagnostics.limit}</span>
+                  <span>Last Query: {lastQueryDisplay}</span>
+                </div>
+                <div className="flex flex-wrap items-center gap-3 text-[11px]">
+                  <span>Total payments: {diagnostics.total}</span>
+                  <span>Accepted: {diagnostics.kept}</span>
+                  <span>Memo types: {memoTypeSummary}</span>
+                </div>
+                <div>
+                  <p className="font-medium text-foreground/80">Dropped reasons</p>
+                  <ul className="mt-1 space-y-1">
+                    {dropReasonEntries.length
+                      ? dropReasonEntries.map(([reason, count]) => (
+                          <li key={reason} className="flex items-center justify-between gap-4">
+                            <span className="capitalize text-foreground/70">{reason.replace(/-/g, " ")}</span>
+                            <span className="font-mono text-foreground">{count}</span>
+                          </li>
+                        ))
+                      : <li className="text-foreground/50">No drops recorded.</li>}
+                  </ul>
+                </div>
+                <div>
+                  <button
+                    type="button"
+                    aria-expanded={peekOpen}
+                    aria-controls="custodian-peek-json"
+                    onClick={() => setPeekOpen((prev) => !prev)}
+                    className="rounded-full border border-border/50 px-3 py-1 text-[11px] font-medium text-foreground transition hover:border-primary/60 hover:text-primary"
+                  >
+                    {peekOpen ? "Hide Horizon JSON" : "Peek Horizon JSON"}
+                  </button>
+                  {peekOpen ? (
+                    <pre
+                      id="custodian-peek-json"
+                      className="mt-2 max-h-64 overflow-auto rounded-lg border border-border/40 bg-background/50 p-3 text-[11px] font-mono text-foreground/70"
+                    >
+                      {JSON.stringify(debugSamples, null, 2)}
+                    </pre>
+                  ) : null}
+                </div>
+                {debugSamples.length ? (
+                  <div>
+                    <p className="font-medium text-foreground/80">Sample payments</p>
+                    <ul className="mt-1 space-y-1 font-mono text-[11px] text-foreground/70">
+                      {debugSamples.map((sample) => (
+                        <li key={sample.id} className="break-all">
+                          {sample.transaction_hash.slice(0, 8)}… · to {maskAccountId(sample.to)} · {sample.amount ?? "?"} · memo {sample.transaction?.memo_type ?? "none"}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+
             <div className="mt-6 space-y-4">
               {requestsLoading ? (
                 <div className="rounded-xl border border-border/50 bg-background/40 p-6 text-center text-sm text-muted-foreground">
@@ -254,37 +385,46 @@ const CustodianPage = () => {
                 </div>
               ) : filteredRequests.length === 0 ? (
                 <div className="rounded-xl border border-border/50 bg-background/40 p-6 text-center text-sm text-muted-foreground">
-                  {EMPTY_REQUESTS_HELPER}
+                  {totalRequests === 0 ? "No on-chain tokenization requests yet." : EMPTY_REQUESTS_HELPER}
                 </div>
               ) : (
                 filteredRequests.map((request) => {
                   const badgeClass = REQUEST_STATUS_BADGE[request.status];
                   const selectedKey = selectedRequest
-                    ? selectedRequest.metadataCid ?? selectedRequest.memoHashHex ?? selectedRequest.txHash
+                    ? (selectedRequest.memo.kind === "cid"
+                        ? selectedRequest.memo.value
+                        : selectedRequest.memo.kind === "hash"
+                          ? selectedRequest.memo.value
+                          : selectedRequest.txHash)
                     : null;
-                  const requestKey = request.metadataCid ?? request.memoHashHex ?? request.txHash;
+                  const requestKey = request.memo.kind === "cid" || request.memo.kind === "hash"
+                    ? request.memo.value
+                    : request.txHash;
                   const isSelected = selectedKey != null && selectedKey === requestKey;
-                  const metadataLoaded = request.metadataStatus === "loaded" && request.metadata;
+                  const metadataLoaded = request.metadataStatus === "loaded" && request.meta;
                   const metadataError = request.metadataStatus === "error" ? request.metadataError : undefined;
-                  const isHashOnly = !request.cid && !!request.memoHashHex;
+                  const isHashOnly = request.memo.kind === "hash";
                   const title = metadataLoaded
-                    ? request.metadata!.asset.name
+                    ? request.meta?.name ?? "Token request"
                     : isHashOnly
                       ? "Request (hash-only)"
                       : "Request";
-                  const issuerLabel = metadataLoaded ? request.issuer ?? request.from : request.from;
-                  const submittedAt = request.submittedAt ?? request.ts;
-                  const identifierLabel = request.cid ? "Memo CID" : "Memo Hash";
-                  const identifierValue = request.cid ?? request.memoHashHex ?? "";
-                  const proofValue = metadataLoaded ? request.proofCid : undefined;
+                  const issuerLabel = request.from;
+                  const submittedAt = request.createdAt;
+                  const identifierLabel = request.memo.kind === "cid" ? "Memo CID" : "Memo Hash";
+                  const identifierValue = request.memo.value;
+                  const metadataLink = request.memo.kind === "cid" ? getViaGateway(request.memo.value) : undefined;
+                  const proofValue = metadataLoaded ? request.meta?.proofCid : undefined;
                   const proofLabel = metadataLoaded ? "Proof CID" : undefined;
                   const valueDisplay = metadataLoaded
-                    ? formatUSD(request.valueUSD ?? 0)
-                    : `${request.amount} ${request.assetCode}`;
+                    ? formatUSD(request.meta?.valueUsd ?? 0)
+                    : formatXlm(request.amount);
                   const yieldDisplay =
-                    metadataLoaded && request.expectedYieldPct != null
-                      ? `Expected Yield ${request.expectedYieldPct}%`
-                      : `Asset ${request.assetCode}`;
+                    metadataLoaded && request.meta?.expectedYieldPct != null
+                      ? `Expected Yield ${request.meta.expectedYieldPct}%`
+                      : "Asset XLM";
+                  const memoBadge = MEMO_BADGES[request.memo.kind];
+                  const showLiveAction = request.status === "pending" && Boolean(request.txHash);
                   return (
                     <div
                       key={requestKey}
@@ -299,9 +439,14 @@ const CustodianPage = () => {
                             <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${badgeClass}`}>
                               {REQUEST_STATUS_LABEL[request.status]}
                             </span>
+                            {memoBadge ? (
+                              <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${memoBadge.className}`}>
+                                {memoBadge.label}
+                              </span>
+                            ) : null}
                           </div>
                           <p className="mt-1 text-xs text-muted-foreground">
-                            Submitted {formatDate(submittedAt)} · From {issuerLabel}
+                            Submitted {formatDateTime(submittedAt)} · From {issuerLabel}
                           </p>
                           {metadataError ? (
                             <p className="mt-2 text-xs text-amber-400">
@@ -310,7 +455,7 @@ const CustodianPage = () => {
                           ) : null}
                           {request.metadataStatus === "missing" && !metadataLoaded ? (
                             <p className="mt-2 text-xs text-muted-foreground">
-                              Hash-only reference detected. Provide attestation referencing the memo hash below.
+                              Hash-only reference detected. Provide attestation referencing the memo hash below (base64 memo decoded to hex).
                             </p>
                           ) : null}
                         </div>
@@ -323,7 +468,18 @@ const CustodianPage = () => {
                         {identifierValue ? (
                           <div className="space-y-1">
                             <span className="font-medium text-foreground/80">{identifierLabel}</span>
-                            <CopyHash value={identifierValue} />
+                            <div className="flex flex-wrap items-center gap-2">
+                              <CopyHash value={identifierValue} />
+                              {metadataLink ? (
+                                <button
+                                  type="button"
+                                  onClick={() => window.open(metadataLink, "_blank", "noopener,noreferrer")}
+                                  className="rounded-full border border-border/40 px-3 py-1 text-[11px] font-semibold text-foreground transition hover:border-primary/60 hover:text-primary"
+                                >
+                                  Open CID
+                                </button>
+                              ) : null}
+                            </div>
                           </div>
                         ) : null}
                         {proofLabel && proofValue ? (
@@ -334,7 +490,33 @@ const CustodianPage = () => {
                         ) : (
                           <div className="space-y-1">
                             <span className="font-medium text-foreground/80">Transaction</span>
-                            <CopyHash value={request.txHash} />
+                            <div className="flex flex-wrap items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={() => window.open(`${expertExplorerBase}${request.txHash}`, "_blank", "noopener,noreferrer")}
+                                className="flex w-fit items-center gap-2 rounded-full border border-border/40 px-3 py-1 text-[11px] font-semibold text-foreground transition hover:border-primary/60 hover:text-primary"
+                              >
+                                View on Explorer
+                                <span className="font-mono text-[10px] text-muted-foreground">{request.txHash.slice(0, 8)}…</span>
+                              </button>
+                              {showLiveAction ? (
+                                <button
+                                  type="button"
+                                  aria-label="Open live transaction widget"
+                                  title="Open live transaction widget"
+                                  onClick={() => {
+                                    setExpertTxHash(request.txHash);
+                                    setExpertDialogOpen(true);
+                                  }}
+                                  className="flex h-8 w-8 items-center justify-center rounded-full border border-border/40 text-[11px] font-semibold text-foreground transition hover:border-primary/60 hover:text-primary"
+                                >
+                                  <svg aria-hidden className="h-3.5 w-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
+                                    <path d="M4 4h8v8" strokeLinecap="round" strokeLinejoin="round" />
+                                    <path d="M4 12 12 4" strokeLinecap="round" strokeLinejoin="round" />
+                                  </svg>
+                                </button>
+                              ) : null}
+                            </div>
                           </div>
                         )}
                       </div>
@@ -404,6 +586,17 @@ const CustodianPage = () => {
 
       <SubmissionModal open={submission !== null} attestation={submission} onClose={() => setSubmission(null)} />
       <AttestationDrawer open={drawerOpen} onClose={handleAttestationClose} item={selectedAttestation} />
+      {expertTxHash ? (
+        <StellarExpertWidgetDialog
+          txHash={expertTxHash}
+          network={expertNetwork}
+          open={expertDialogOpen}
+          onClose={() => {
+            setExpertDialogOpen(false);
+            setExpertTxHash(null);
+          }}
+        />
+      ) : null}
     </LayoutShell>
   );
 };

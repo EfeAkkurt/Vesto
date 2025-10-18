@@ -1,9 +1,10 @@
 import { Buffer } from "buffer";
+import { CID } from "multiformats/cid";
 import { z } from "zod";
-import { loadSDK } from "@/src/lib/stellar/sdk";
-import { IPFS_GATEWAY } from "@/src/utils/constants";
-
-const MIN_STROOP_AMOUNT = 0.0000001;
+import { getServer } from "@/src/lib/stellar/sdk";
+import { debug, debugObj } from "@/src/lib/logging/logger";
+import { CUSTODIAN_ACCOUNT, HORIZON, IPFS_GATEWAY } from "@/src/utils/constants";
+import { parseAmountToStroops } from "@/src/lib/utils/format";
 
 const TokenRequestMetadataSchema = z.object({
   schema: z.string().min(1),
@@ -23,29 +24,26 @@ export type TokenRequestMetadata = z.infer<typeof TokenRequestMetadataSchema> & 
   proofUrl: string;
 };
 
+export type TokenizationMemo =
+  | { kind: "cid"; value: string }
+  | { kind: "hash"; value: string };
+
 export type TokenizationRequest = {
   txHash: string;
-  ts: string;
-  submittedAt: string;
+  createdAt: string;
   from: string;
   to: string;
   amount: string;
-  assetCode: string;
-  assetIssuer?: string;
-  memoType: "text" | "hash" | "none";
-  cid?: string;
-  memoHashHex?: string;
-  metadataCid?: string;
-  metadata?: TokenRequestMetadata;
-  metadataStatus: "loaded" | "pending" | "missing" | "error";
+  memo: TokenizationMemo;
+  meta?: {
+    name?: string;
+    type?: string;
+    valueUsd?: number;
+    expectedYieldPct?: number;
+    proofCid?: string;
+  };
+  metadataStatus: "loaded" | "missing" | "error" | "pending";
   metadataError?: string;
-  issuer?: string;
-  assetType?: string;
-  assetName?: string;
-  valueUSD?: number;
-  expectedYieldPct?: number;
-  proofCid?: string;
-  proofUrl?: string;
 };
 
 type HorizonPaymentRecord = {
@@ -101,17 +99,6 @@ const fetchMetadata = async (cid: string): Promise<TokenRequestMetadata> => {
   return metadataCache.get(cid)!;
 };
 
-const parseAmount = (value?: string): number => {
-  if (!value) return 0;
-  const numeric = Number.parseFloat(value);
-  return Number.isFinite(numeric) ? numeric : 0;
-};
-
-const normaliseAssetCode = (assetType?: string, assetCode?: string): string => {
-  if (!assetType || assetType === "native") return "XLM";
-  return assetCode ?? assetType.toUpperCase();
-};
-
 const decodeMemoHashHex = (memo?: string | null): string | undefined => {
   if (!memo) return undefined;
   try {
@@ -121,128 +108,298 @@ const decodeMemoHashHex = (memo?: string | null): string | undefined => {
   }
 };
 
-const pickMemo = (record: HorizonPaymentRecord): { memoType: "text" | "hash" | "none"; cid?: string; memoHashHex?: string } => {
-  const memoType =
-    record.transaction?.memo_type ??
-    record.transaction_attr?.memo_type ??
-    null;
-  const memoValue =
-    record.transaction?.memo ??
-    record.transaction_attr?.memo ??
-    record.memo ??
-    null;
-
-  if (!memoType || memoType === "none") {
-    if (memoValue && memoValue.trim().length > 0) {
-      return { memoType: "text", cid: memoValue.trim() };
-    }
-    return { memoType: "none" };
+const normaliseCid = (value?: string | null): string | undefined => {
+  if (!value) return undefined;
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  try {
+    return CID.parse(trimmed).toV1().toString();
+  } catch {
+    return undefined;
   }
+};
+
+const pickMemo = (record: HorizonPaymentRecord): TokenizationMemo | null => {
+  const transaction = record.transaction_attr ?? record.transaction ?? null;
+  const memoType = transaction?.memo_type ?? null;
 
   if (memoType === "text") {
-    const trimmed = memoValue?.trim();
-    return trimmed ? { memoType: "text", cid: trimmed } : { memoType: "text" };
+    const rawValue = transaction?.memo ?? record.memo ?? null;
+    const cid = normaliseCid(rawValue);
+    return cid ? { kind: "cid", value: cid } : null;
   }
 
   if (memoType === "hash") {
-    const memoHashHex = decodeMemoHashHex(memoValue);
-    return { memoType: "hash", memoHashHex };
+    const hashValue =
+      (transaction as { memo_hash?: string } | null)?.memo_hash ??
+      transaction?.memo ??
+      record.memo ??
+      null;
+    const memoHashHex = decodeMemoHashHex(hashValue);
+    return memoHashHex ? { kind: "hash", value: memoHashHex } : null;
   }
 
-  return { memoType: "none" };
+  return null;
 };
 
-const normalisePaymentRecord = (record: HorizonPaymentRecord, accountId: string): TokenizationRequest | null => {
-  const toAccount = record.to ?? "";
-  if (toAccount !== accountId) return null;
-
+const normalisePaymentRecord = (
+  record: HorizonPaymentRecord,
+  memo: TokenizationMemo,
+): TokenizationRequest => {
   const amount = record.amount ?? "0";
-  if (parseAmount(amount) < MIN_STROOP_AMOUNT) return null;
-
-  const memoInfo = pickMemo(record);
-  if (!memoInfo.cid && !memoInfo.memoHashHex) return null;
-
+  const toAccount = record.to ?? "";
   const fromAccount = record.from ?? record.source_account ?? "";
 
   return {
     txHash: record.transaction_hash,
-    ts: record.created_at,
-    submittedAt: record.created_at,
+    createdAt: record.created_at,
     from: fromAccount,
     to: toAccount,
     amount,
-    assetCode: normaliseAssetCode(record.asset_type, record.asset_code),
-    assetIssuer: record.asset_issuer,
-    memoType: memoInfo.memoType,
-    cid: memoInfo.cid,
-    memoHashHex: memoInfo.memoHashHex,
-    metadataCid: memoInfo.cid,
-    metadataStatus: memoInfo.cid ? "pending" : "missing",
+    memo,
+    metadataStatus: memo.kind === "cid" ? "pending" : "missing",
   };
 };
 
-type PaymentsCallBuilder = {
-  forAccount(accountId: string): PaymentsCallBuilder;
-  order(direction: "asc" | "desc"): PaymentsCallBuilder;
-  limit(limit: number): PaymentsCallBuilder;
-  includeTransactions(include: boolean): PaymentsCallBuilder;
+const DEFAULT_LIMIT = 100;
+
+type PaymentsQuery = {
+  forAccount(accountId: string): PaymentsQuery;
+  order(direction: "asc" | "desc"): PaymentsQuery;
+  limit(limit: number): PaymentsQuery;
+  join(resource: string): PaymentsQuery;
+  includeTransactions?: (include: boolean) => PaymentsQuery;
   call(): Promise<{ records: HorizonPaymentRecord[] }>;
 };
 
-type StellarServer = {
-  payments(): PaymentsCallBuilder;
+type HorizonServerApi = {
+  payments(): PaymentsQuery;
 };
 
-type ServerConstructor = new (url: string) => StellarServer;
+export type CustodianRequestDiagnostics = {
+  timestamp: string;
+  account: string;
+  limit: number;
+  total: number;
+  kept: number;
+  memoTypes: Record<"cid" | "hash", number>;
+  droppedByReason: Record<string, number>;
+  samples: CustodianRecordSample[];
+};
 
-export const fetchTokenizationRequests = async (serverUrl: string, accountId: string, limit = 50): Promise<TokenizationRequest[]> => {
-  const { Server } = (await loadSDK()) as unknown as { Server: ServerConstructor };
-  const server = new Server(serverUrl.replace(/\/$/, ""));
+export type CustodianRequestResult = {
+  items: TokenizationRequest[];
+  diagnostics: CustodianRequestDiagnostics;
+};
 
-  const page = await server
-    .payments()
-    .forAccount(accountId)
-    .order("desc")
-    .limit(limit)
-    .includeTransactions(true)
-    .call();
+type CustodianRecordSample = {
+  id: string;
+  created_at: string;
+  amount?: string;
+  asset_type?: string;
+  from?: string;
+  to?: string;
+  transaction_hash: string;
+  transaction?: HorizonPaymentRecord["transaction"];
+};
 
-  const normalised = page.records
-    .map((record) => normalisePaymentRecord(record, accountId))
-    .filter((record): record is TokenizationRequest => Boolean(record));
+const sanitizeRecord = (record: HorizonPaymentRecord): CustodianRecordSample => ({
+  id: record.id,
+  created_at: record.created_at,
+  amount: record.amount,
+  asset_type: record.asset_type,
+  from: record.from ?? record.source_account,
+  to: record.to,
+  transaction_hash: record.transaction_hash,
+  transaction: record.transaction ?? record.transaction_attr ?? undefined,
+});
+
+const registerDrop = (
+  reason: string,
+  context: Record<string, unknown>,
+  droppedByReason: Record<string, number>,
+) => {
+  droppedByReason[reason] = (droppedByReason[reason] ?? 0) + 1;
+  debugObj(`[custodian:drop:${reason}]`, context);
+};
+
+export const fetchCustodianRequests = async (
+  accountId = CUSTODIAN_ACCOUNT,
+  limit = DEFAULT_LIMIT,
+): Promise<CustodianRequestResult> => {
+  const resolvedAccount = accountId?.trim() || CUSTODIAN_ACCOUNT;
+  if (!resolvedAccount) {
+    debug("[custodian:query] skipped - missing account id");
+    return {
+      items: [],
+      diagnostics: {
+        timestamp: new Date().toISOString(),
+        account: "",
+        limit: limit ?? DEFAULT_LIMIT,
+        total: 0,
+        kept: 0,
+        memoTypes: { cid: 0, hash: 0 },
+        droppedByReason: {},
+        samples: [],
+      },
+    };
+  }
+
+  const server = (await getServer()) as HorizonServerApi;
+  const safeLimit = Number.isFinite(limit)
+    ? Math.max(1, Math.min(200, Math.trunc(limit)))
+    : 100;
+  let query = server.payments().forAccount(resolvedAccount).order("desc").limit(safeLimit);
+
+  if (typeof query.includeTransactions === "function") {
+    query = query.includeTransactions(true);
+  } else {
+    query = query.join("transactions");
+  }
+
+  debug("[custodian:query]", {
+    url: HORIZON,
+    account: resolvedAccount,
+    limit: safeLimit,
+  });
+
+  const page = await query.call();
+
+  const memoTypes: Record<"cid" | "hash", number> = { cid: 0, hash: 0 };
+  const droppedByReason: Record<string, number> = {};
+  const normalised: TokenizationRequest[] = [];
+  const samples: CustodianRecordSample[] = [];
+
+  for (const record of page.records) {
+    debug("[custodian:record]", {
+      id: record.id,
+      amount: record.amount,
+      memo_type: record.transaction?.memo_type ?? record.transaction_attr?.memo_type,
+      has_tx: Boolean(record.transaction),
+    });
+
+    if (samples.length < 2) {
+      samples.push(sanitizeRecord(record));
+    }
+
+    if (record.type !== "payment") {
+      registerDrop("not-payment", { id: record.id }, droppedByReason);
+      continue;
+    }
+
+    if ((record.asset_type ?? "native") !== "native") {
+      registerDrop(
+        "non-native-asset",
+        { id: record.id, asset_type: record.asset_type },
+        droppedByReason,
+      );
+      continue;
+    }
+
+    const toAccount = record.to ?? "";
+    if (toAccount !== resolvedAccount) {
+      registerDrop(
+        "not-to-custodian",
+        { id: record.id, to: record.to, expected: resolvedAccount },
+        droppedByReason,
+      );
+      continue;
+    }
+
+    const amount = record.amount ?? "0";
+    const stroops = parseAmountToStroops(amount);
+    if (stroops < 1) {
+      registerDrop("under-stroop", { id: record.id, amount }, droppedByReason);
+      continue;
+    }
+
+    const memo = pickMemo(record);
+    if (!memo) {
+      registerDrop(
+        "invalid-memo",
+        {
+          id: record.id,
+          memo_type: record.transaction_attr?.memo_type ?? record.transaction?.memo_type,
+          memo: record.transaction_attr?.memo ?? record.transaction?.memo ?? record.memo,
+        },
+        droppedByReason,
+      );
+      continue;
+    }
+
+    memoTypes[memo.kind] += 1;
+    normalised.push(normalisePaymentRecord(record, memo));
+  }
 
   const withMetadata = await Promise.all(
     normalised.map(async (entry) => {
-      if (!entry.cid) {
-        return {
-          ...entry,
-          metadataStatus: "missing" as const,
-        };
+      if (entry.memo.kind !== "cid") {
+        return entry;
       }
       try {
-        const metadata = await fetchMetadata(entry.cid);
-        return {
+        debugObj("[custodian:ipfs:request]", {
+          cid: entry.memo.value,
+          url: buildGatewayUrl(entry.memo.value),
+        });
+        const metadata = await fetchMetadata(entry.memo.value);
+        const hydrated = {
           ...entry,
-          metadata,
           metadataStatus: "loaded" as const,
-          issuer: metadata.issuer,
-          assetType: metadata.asset.type,
-          assetName: metadata.asset.name,
-          valueUSD: metadata.asset.valueUSD,
-          expectedYieldPct: metadata.asset.expectedYieldPct,
-          proofCid: metadata.proofCid,
-          proofUrl: metadata.proofUrl,
-        };
+          meta: {
+            name: metadata.asset.name,
+            type: metadata.asset.type,
+            valueUsd: metadata.asset.valueUSD,
+            expectedYieldPct: metadata.asset.expectedYieldPct,
+            proofCid: metadata.proofCid,
+          },
+        } satisfies TokenizationRequest;
+        debugObj("[custodian:ipfs:success]", { cid: entry.memo.value });
+        return hydrated;
       } catch (error) {
-        console.warn("Failed to fetch token request metadata", { cid: entry.cid, error });
+        debugObj("[custodian:ipfs:error]", {
+          cid: entry.memo.value,
+          message: error instanceof Error ? error.message : "unknown",
+        });
         return {
           ...entry,
           metadataStatus: "error" as const,
           metadataError: error instanceof Error ? error.message : "Unknown metadata error",
-        };
+        } satisfies TokenizationRequest;
       }
     }),
   );
 
-  return withMetadata.sort((a, b) => new Date(b.ts).getTime() - new Date(a.ts).getTime());
+  const sorted = withMetadata.sort(
+    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+  );
+
+  const diagnostics: CustodianRequestDiagnostics = {
+    timestamp: new Date().toISOString(),
+    account: resolvedAccount,
+    limit: safeLimit,
+    total: page.records.length,
+    kept: sorted.length,
+    memoTypes,
+    droppedByReason,
+    samples,
+  };
+
+  debug("[custodian:requests:summary]", {
+    total: diagnostics.total,
+    kept: diagnostics.kept,
+    memoTypes,
+    samples: diagnostics.samples.slice(0, 2).map((sample) => ({
+      id: sample.id,
+      memoType: sample.transaction?.memo_type,
+      memo: sample.transaction?.memo,
+    })),
+  });
+  debugObj("[custodian:requests]", diagnostics);
+
+  return {
+    items: sorted,
+    diagnostics,
+  };
 };
+
+export const fetchTokenizationRequests = fetchCustodianRequests;

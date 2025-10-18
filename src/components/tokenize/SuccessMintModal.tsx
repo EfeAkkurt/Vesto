@@ -8,6 +8,8 @@ import { CopyHash } from "@/src/components/ui/CopyHash";
 import { formatUSD } from "@/src/lib/utils/format";
 import { STELLAR_NET } from "@/src/utils/constants";
 import type { MintResult } from "@/src/lib/types/proofs";
+import { resolveExpertNetwork } from "@/src/lib/stellar/expert";
+import { StellarExpertWidgetDialog } from "@/src/components/stellar/StellarExpertWidgetDialog";
 
 export type SuccessMintModalProps = {
   open: boolean;
@@ -25,12 +27,19 @@ export const SuccessMintModal = forwardRef<SuccessMintModalHandle, SuccessMintMo
     const [mounted, setMounted] = useState(false);
     const containerRef = useRef<HTMLDivElement>(null);
     const primaryButtonRef = useRef<HTMLAnchorElement | HTMLButtonElement>(null);
+    const [widgetOpen, setWidgetOpen] = useState(false);
 
     useImperativeHandle(ref, () => ({ focusPrimary: () => primaryButtonRef.current?.focus() }), []);
 
     useEffect(() => {
       setMounted(true);
     }, []);
+
+    useEffect(() => {
+      if (!open) {
+        setWidgetOpen(false);
+      }
+    }, [open]);
 
     useEffect(() => {
       if (!open) return undefined;
@@ -77,33 +86,38 @@ export const SuccessMintModal = forwardRef<SuccessMintModalHandle, SuccessMintMo
         : "https://stellar.expert/explorer/testnet/tx/";
       return `${base}${content.txHash}`;
     }, [content?.txHash]);
+    const expertNetwork = resolveExpertNetwork(STELLAR_NET);
+    const txHash = content?.txHash ?? null;
+    const hasTxHash = typeof txHash === "string" && txHash.length > 0;
 
     if (!mounted) return null;
 
     return createPortal(
-      <AnimatePresence>
-        {open && content ? (
-          <motion.div
-            className="fixed inset-0 z-[95] flex items-center justify-center bg-black/60 backdrop-blur"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.15 }}
-            onClick={(event) => {
-              if (event.target === event.currentTarget) onClose();
-            }}
-          >
+      <>
+        <AnimatePresence initial={false}>
+          {open && content ? (
             <motion.div
-              ref={containerRef}
-              role="dialog"
-              aria-modal="true"
-              aria-labelledby="success-mint-title"
-              initial={prefersReducedMotion ? { opacity: 0 } : { opacity: 0, scale: 0.96 }}
-              animate={prefersReducedMotion ? { opacity: 1 } : { opacity: 1, scale: 1 }}
-              exit={prefersReducedMotion ? { opacity: 0 } : { opacity: 0, scale: 0.96 }}
-              transition={{ duration: 0.2, ease: [0.33, 1, 0.68, 1] }}
-              className="w-full max-w-md rounded-2xl border border-border/60 bg-card/90 p-6 shadow-2xl"
+              key={txHash ?? "success-modal"}
+              className="fixed inset-0 z-[95] flex items-center justify-center bg-black/60 backdrop-blur"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.15 }}
+              onClick={(event) => {
+                if (event.target === event.currentTarget) onClose();
+              }}
             >
+              <motion.div
+                ref={containerRef}
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="success-mint-title"
+                initial={prefersReducedMotion ? { opacity: 0 } : { opacity: 0, scale: 0.96 }}
+                animate={prefersReducedMotion ? { opacity: 1 } : { opacity: 1, scale: 1 }}
+                exit={prefersReducedMotion ? { opacity: 0 } : { opacity: 0, scale: 0.96 }}
+                transition={{ duration: 0.2, ease: [0.33, 1, 0.68, 1] }}
+                className="w-full max-w-md rounded-2xl border border-border/60 bg-card/90 p-5 shadow-2xl"
+              >
               <div className="flex items-start justify-between">
                 <div className="flex items-center gap-3">
                   <span className="flex h-12 w-12 items-center justify-center rounded-full bg-primary/15 text-primary">
@@ -127,7 +141,7 @@ export const SuccessMintModal = forwardRef<SuccessMintModalHandle, SuccessMintMo
                 </button>
               </div>
 
-              <div className="mt-6 space-y-4 rounded-xl border border-border/40 bg-background/40 p-4 text-sm">
+              <div className="mt-5 space-y-4 rounded-xl border border-border/40 bg-background/40 p-3 text-sm">
                 <div className="flex items-center justify-between">
                   <span className="text-muted-foreground">Token ID</span>
                   <span className="font-semibold text-foreground">{content.tokenId}</span>
@@ -176,7 +190,7 @@ export const SuccessMintModal = forwardRef<SuccessMintModalHandle, SuccessMintMo
                 </div>
               </div>
 
-              <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:justify-end">
+              <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 {explorerUrl ? (
                   <a
                     href={explorerUrl}
@@ -184,30 +198,53 @@ export const SuccessMintModal = forwardRef<SuccessMintModalHandle, SuccessMintMo
                     rel="noopener noreferrer"
                     className="inline-flex items-center justify-center rounded-lg border border-border/60 px-4 py-2 text-sm font-semibold text-foreground transition hover:border-primary/50 hover:text-primary"
                   >
-                    View on Explorer
+                    View on Stellar Expert
                   </a>
-                ) : null}
-                <Link
-                  href="/custodian"
-                  ref={(node) => {
-                    primaryButtonRef.current = node ?? null;
-                  }}
-                  className="inline-flex items-center justify-center rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground transition hover:bg-primary/90"
-                >
-                  Go to Custodian
-                </Link>
-                <button
-                  type="button"
-                  onClick={onClose}
-                  className="inline-flex items-center justify-center rounded-lg border border-border/60 px-4 py-2 text-sm font-semibold text-foreground transition hover:border-primary/50 hover:text-primary"
-                >
-                  Close
-                </button>
+                ) : (
+                  <span className="hidden sm:block" />
+                )}
+                <div className="flex flex-col gap-3 sm:flex-row sm:gap-2">
+                  {hasTxHash ? (
+                    <button
+                      type="button"
+                      onClick={() => setWidgetOpen(true)}
+                      className="inline-flex items-center justify-center rounded-lg border border-border/60 px-4 py-2 text-sm font-semibold text-foreground transition hover:border-primary/50 hover:text-primary"
+                    >
+                      View Live Details
+                    </button>
+                  ) : null}
+                  <Link
+                    href="/custodian"
+                    ref={(node) => {
+                      primaryButtonRef.current = node ?? null;
+                    }}
+                    className="inline-flex items-center justify-center rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground transition hover:bg-primary/90"
+                  >
+                    Go to Custodian
+                  </Link>
+                  <button
+                    type="button"
+                    onClick={onClose}
+                    className="inline-flex items-center justify-center rounded-lg border border-border/60 px-4 py-2 text-sm font-semibold text-foreground transition hover:border-primary/50 hover:text-primary"
+                  >
+                    Close
+                  </button>
+                </div>
               </div>
+              </motion.div>
             </motion.div>
-          </motion.div>
+          ) : null}
+        </AnimatePresence>
+        {hasTxHash ? (
+          <StellarExpertWidgetDialog
+            key="expert-widget"
+            txHash={txHash!}
+            network={expertNetwork}
+            open={widgetOpen}
+            onClose={() => setWidgetOpen(false)}
+          />
         ) : null}
-      </AnimatePresence>,
+      </>,
       document.body,
     );
   },

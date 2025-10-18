@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useRef, useState } from "react";
+import { mutate } from "swr";
 import { motion, useReducedMotion } from "framer-motion";
 import { transitions, fadeInUp } from "@/src/components/motion/presets";
 import { LayoutShell } from "@/src/components/layout/LayoutShell";
@@ -10,7 +11,7 @@ import { TokenizeForm, type TokenizeFormHandle, type TokenizeFormValues } from "
 import { LivePreviewCard } from "@/src/components/tokenize/LivePreviewCard";
 import { SuccessMintModal } from "@/src/components/tokenize/SuccessMintModal";
 import type { MintResult } from "@/src/lib/types/proofs";
-import { CUSTODIAN_ACCOUNT } from "@/src/utils/constants";
+import { CUSTODIAN_ACCOUNT, STELLAR_NET } from "@/src/utils/constants";
 
 const initialFormValues: TokenizeFormValues = {
   assetType: "",
@@ -37,6 +38,11 @@ export default function TokenizePage() {
   const handleMintSuccess = (result: MintResult) => {
     setMintResult(result);
     setModalOpen(true);
+    const accountKey = CUSTODIAN_ACCOUNT?.trim();
+    if (accountKey) {
+      const networkKey = STELLAR_NET?.trim() || "TESTNET";
+      void mutate(["custodian-requests", accountKey, networkKey]);
+    }
   };
 
   const handleModalClose = () => {

@@ -33,3 +33,41 @@ export async function loadSDK(): Promise<StellarModule> {
 }
 
 export const loadStellar = loadSDK;
+
+export async function getServer() {
+  const url = process.env.NEXT_PUBLIC_HORIZON_URL?.trim();
+  if (!url) {
+    throw new Error("NEXT_PUBLIC_HORIZON_URL is required to create the Horizon Server instance.");
+  }
+
+  const sdkModule = (await import("stellar-sdk")) as unknown as {
+    Server?: new (url: string) => unknown;
+    Horizon?: { Server?: new (url: string) => unknown };
+    default?: {
+      Server?: new (url: string) => unknown;
+      Horizon?: { Server?: new (url: string) => unknown };
+    };
+  };
+
+  const ServerCtor =
+    sdkModule.Server ??
+    sdkModule.Horizon?.Server ??
+    sdkModule.default?.Server ??
+    sdkModule.default?.Horizon?.Server;
+
+  if (!ServerCtor) {
+    throw new Error("Stellar SDK Server constructor unavailable");
+  }
+
+  type ServerInstance = InstanceType<typeof ServerCtor>;
+  const globalContext = globalThis as typeof globalThis & { __vestoServer?: ServerInstance };
+
+  if (!globalContext.__vestoServer) {
+    // Vesto: join-transactions fix
+    globalContext.__vestoServer = new ServerCtor(url) as ServerInstance;
+  }
+
+  return globalContext.__vestoServer as ServerInstance;
+}
+
+export const STELLAR_NETWORK_PASSPHRASE = (process.env.NEXT_PUBLIC_NETWORK_PASSPHRASE ?? "").trim();

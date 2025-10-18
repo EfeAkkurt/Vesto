@@ -274,6 +274,9 @@ const dedupeCandidates = (payments: HorizonPayment[]): AttestationCandidate[] =>
     const metadataCid = extractMemoCid(payment);
     if (!metadataCid) return;
 
+    // Log memo hash for debugging
+    console.log(`Memo hash: ${metadataCid}`, { payment });
+
     const existing = map.get(metadataCid);
     if (!existing) {
       map.set(metadataCid, { payment, metadataCid });
