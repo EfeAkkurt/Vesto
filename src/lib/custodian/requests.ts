@@ -1,8 +1,9 @@
 import { Buffer } from "buffer";
 import { z } from "zod";
-import type { HorizonPayment } from "@/src/hooks/horizon";
-import { extractMemoCid } from "@/src/lib/horizon/memos";
-import { getViaGateway } from "@/src/lib/ipfs/client";
+import { loadSDK } from "@/src/lib/stellar/sdk";
+import { IPFS_GATEWAY } from "@/src/utils/constants";
+
+const MIN_STROOP_AMOUNT = 0.0000001;
 
 const TokenRequestMetadataSchema = z.object({
   schema: z.string().min(1),
@@ -18,105 +19,230 @@ const TokenRequestMetadataSchema = z.object({
   timestamp: z.string().min(1),
 });
 
-export type TokenRequestMetadata = z.infer<typeof TokenRequestMetadataSchema>;
-
-export type TokenizationRequest = {
-  id: string;
-  txHash: string;
-  metadataCid: string;
-  submittedAt: string;
-  issuer: string;
-  assetType: string;
-  assetName: string;
-  valueUSD: number;
-  expectedYieldPct?: number;
-  proofCid: string;
+export type TokenRequestMetadata = z.infer<typeof TokenRequestMetadataSchema> & {
   proofUrl: string;
 };
 
+export type TokenizationRequest = {
+  txHash: string;
+  ts: string;
+  submittedAt: string;
+  from: string;
+  to: string;
+  amount: string;
+  assetCode: string;
+  assetIssuer?: string;
+  memoType: "text" | "hash" | "none";
+  cid?: string;
+  memoHashHex?: string;
+  metadataCid?: string;
+  metadata?: TokenRequestMetadata;
+  metadataStatus: "loaded" | "pending" | "missing" | "error";
+  metadataError?: string;
+  issuer?: string;
+  assetType?: string;
+  assetName?: string;
+  valueUSD?: number;
+  expectedYieldPct?: number;
+  proofCid?: string;
+  proofUrl?: string;
+};
+
+type HorizonPaymentRecord = {
+  id: string;
+  created_at: string;
+  type: string;
+  amount?: string;
+  asset_type?: string;
+  asset_code?: string;
+  asset_issuer?: string;
+  transaction_hash: string;
+  source_account?: string;
+  from?: string;
+  to?: string;
+  memo?: string | null;
+  transaction?: {
+    memo_type?: string | null;
+    memo?: string | null;
+  };
+  transaction_attr?: {
+    memo_type?: string | null;
+    memo?: string | null;
+  };
+};
+
 const metadataCache = new Map<string, Promise<TokenRequestMetadata>>();
+
+const buildGatewayUrl = (cid: string): string => {
+  const base = IPFS_GATEWAY.endsWith("/") ? IPFS_GATEWAY.slice(0, -1) : IPFS_GATEWAY;
+  return `${base}/${cid}`;
+};
 
 const fetchMetadata = async (cid: string): Promise<TokenRequestMetadata> => {
   if (!metadataCache.has(cid)) {
     metadataCache.set(
       cid,
       (async () => {
-        const url = `https://ipfs.io/ipfs/${cid}`;
-        const res = await fetch(url, { headers: { Accept: "application/json, application/cbor" } });
-        if (!res.ok) {
-          throw new Error(`Failed to load token request metadata (${res.status})`);
+        const response = await fetch(buildGatewayUrl(cid), {
+          headers: { Accept: "application/json, application/cbor" },
+        });
+        if (!response.ok) {
+          throw new Error(`Failed to fetch token request metadata (${response.status})`);
         }
-        const data = await res.json();
-        return TokenRequestMetadataSchema.parse(data);
+        const payload = await response.json();
+        const parsed = TokenRequestMetadataSchema.parse(payload);
+        return {
+          ...parsed,
+          proofUrl: parsed.proofUrl ?? buildGatewayUrl(parsed.proofCid),
+        };
       })(),
     );
   }
   return metadataCache.get(cid)!;
 };
 
-const decodeLegacyMemo = (memo: string): string | null => {
+const parseAmount = (value?: string): number => {
+  if (!value) return 0;
+  const numeric = Number.parseFloat(value);
+  return Number.isFinite(numeric) ? numeric : 0;
+};
+
+const normaliseAssetCode = (assetType?: string, assetCode?: string): string => {
+  if (!assetType || assetType === "native") return "XLM";
+  return assetCode ?? assetType.toUpperCase();
+};
+
+const decodeMemoHashHex = (memo?: string | null): string | undefined => {
+  if (!memo) return undefined;
   try {
-    const buffer = Buffer.from(memo, "base64");
-    return buffer.toString("utf8");
+    return Buffer.from(memo, "base64").toString("hex");
   } catch {
-    return null;
+    return undefined;
   }
 };
 
-const extractRequestCid = (payment: HorizonPayment): string | null => {
-  const cid = extractMemoCid(payment);
-  if (cid) return cid;
+const pickMemo = (record: HorizonPaymentRecord): { memoType: "text" | "hash" | "none"; cid?: string; memoHashHex?: string } => {
+  const memoType =
+    record.transaction?.memo_type ??
+    record.transaction_attr?.memo_type ??
+    null;
+  const memoValue =
+    record.transaction?.memo ??
+    record.transaction_attr?.memo ??
+    record.memo ??
+    null;
 
-  const memo = payment.memo?.trim();
-  if (memo) {
-    const decoded = decodeLegacyMemo(memo);
-    if (decoded) return decoded;
+  if (!memoType || memoType === "none") {
+    if (memoValue && memoValue.trim().length > 0) {
+      return { memoType: "text", cid: memoValue.trim() };
+    }
+    return { memoType: "none" };
   }
 
-  const attrMemo = payment.transaction_attr?.memo?.trim();
-  if (attrMemo) {
-    const decoded = decodeLegacyMemo(attrMemo);
-    if (decoded) return decoded;
+  if (memoType === "text") {
+    const trimmed = memoValue?.trim();
+    return trimmed ? { memoType: "text", cid: trimmed } : { memoType: "text" };
   }
 
-  return null;
+  if (memoType === "hash") {
+    const memoHashHex = decodeMemoHashHex(memoValue);
+    return { memoType: "hash", memoHashHex };
+  }
+
+  return { memoType: "none" };
 };
 
-export const resolveTokenizationRequests = async (
-  payments: HorizonPayment[],
-): Promise<TokenizationRequest[]> => {
-  if (!payments.length) return [];
+const normalisePaymentRecord = (record: HorizonPaymentRecord, accountId: string): TokenizationRequest | null => {
+  const toAccount = record.to ?? "";
+  if (toAccount !== accountId) return null;
 
-  const resolved = await Promise.all(
-    payments.map(async (payment) => {
-      const metadataCid = extractRequestCid(payment);
-      if (!metadataCid) return null;
-      try {
-        const metadata = await fetchMetadata(metadataCid);
-        const proofUrl = metadata.proofUrl ?? getViaGateway(metadata.proofCid);
+  const amount = record.amount ?? "0";
+  if (parseAmount(amount) < MIN_STROOP_AMOUNT) return null;
+
+  const memoInfo = pickMemo(record);
+  if (!memoInfo.cid && !memoInfo.memoHashHex) return null;
+
+  const fromAccount = record.from ?? record.source_account ?? "";
+
+  return {
+    txHash: record.transaction_hash,
+    ts: record.created_at,
+    submittedAt: record.created_at,
+    from: fromAccount,
+    to: toAccount,
+    amount,
+    assetCode: normaliseAssetCode(record.asset_type, record.asset_code),
+    assetIssuer: record.asset_issuer,
+    memoType: memoInfo.memoType,
+    cid: memoInfo.cid,
+    memoHashHex: memoInfo.memoHashHex,
+    metadataCid: memoInfo.cid,
+    metadataStatus: memoInfo.cid ? "pending" : "missing",
+  };
+};
+
+type PaymentsCallBuilder = {
+  forAccount(accountId: string): PaymentsCallBuilder;
+  order(direction: "asc" | "desc"): PaymentsCallBuilder;
+  limit(limit: number): PaymentsCallBuilder;
+  includeTransactions(include: boolean): PaymentsCallBuilder;
+  call(): Promise<{ records: HorizonPaymentRecord[] }>;
+};
+
+type StellarServer = {
+  payments(): PaymentsCallBuilder;
+};
+
+type ServerConstructor = new (url: string) => StellarServer;
+
+export const fetchTokenizationRequests = async (serverUrl: string, accountId: string, limit = 50): Promise<TokenizationRequest[]> => {
+  const { Server } = (await loadSDK()) as unknown as { Server: ServerConstructor };
+  const server = new Server(serverUrl.replace(/\/$/, ""));
+
+  const page = await server
+    .payments()
+    .forAccount(accountId)
+    .order("desc")
+    .limit(limit)
+    .includeTransactions(true)
+    .call();
+
+  const normalised = page.records
+    .map((record) => normalisePaymentRecord(record, accountId))
+    .filter((record): record is TokenizationRequest => Boolean(record));
+
+  const withMetadata = await Promise.all(
+    normalised.map(async (entry) => {
+      if (!entry.cid) {
         return {
-          id: metadataCid,
-          txHash: payment.transaction_hash,
-          metadataCid,
-          submittedAt: payment.created_at,
+          ...entry,
+          metadataStatus: "missing" as const,
+        };
+      }
+      try {
+        const metadata = await fetchMetadata(entry.cid);
+        return {
+          ...entry,
+          metadata,
+          metadataStatus: "loaded" as const,
           issuer: metadata.issuer,
           assetType: metadata.asset.type,
           assetName: metadata.asset.name,
           valueUSD: metadata.asset.valueUSD,
           expectedYieldPct: metadata.asset.expectedYieldPct,
           proofCid: metadata.proofCid,
-          proofUrl,
-        } satisfies TokenizationRequest;
+          proofUrl: metadata.proofUrl,
+        };
       } catch (error) {
-        console.warn("Failed to resolve token request", { metadataCid, error });
-        return null;
+        console.warn("Failed to fetch token request metadata", { cid: entry.cid, error });
+        return {
+          ...entry,
+          metadataStatus: "error" as const,
+          metadataError: error instanceof Error ? error.message : "Unknown metadata error",
+        };
       }
     }),
   );
 
-  const filtered: TokenizationRequest[] = [];
-  resolved.forEach((item) => {
-    if (item) filtered.push(item);
-  });
-  return filtered.sort((a, b) => new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime());
+  return withMetadata.sort((a, b) => new Date(b.ts).getTime() - new Date(a.ts).getTime());
 };

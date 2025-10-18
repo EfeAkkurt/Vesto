@@ -40,13 +40,9 @@ const REQUEST_STATUS_LABEL: Record<RequestStatus, string> = {
   rejected: "Invalid",
 };
 
-const assetTypeOptions: Array<TokenizationRequest["assetType"] | "All"> = [
-  "All",
-  "Invoice",
-  "Subscription",
-  "Rent",
-  "Carbon Credit",
-];
+const assetTypeOptions = ["All", "Invoice", "Subscription", "Rent", "Carbon Credit"] as const;
+
+type AssetTypeFilter = (typeof assetTypeOptions)[number];
 
 const statusFilterOptions: Array<RequestStatus | "all"> = ["pending", "approved", "rejected", "all"];
 
@@ -65,9 +61,13 @@ const CustodianPage = () => {
   const attestationState = useAttestations(custodianAccount, paymentsResponse.data, effectsResponse.data);
   const attestations = useMemo(() => attestationState.data ?? [], [attestationState.data]);
 
-  const { requests: rawRequests, isLoading: requestsLoading } = useTokenizationRequests(custodianAccount, 60);
+  const {
+    requests: rawRequests,
+    isLoading: requestsLoading,
+    mutate: refreshRequests,
+  } = useTokenizationRequests(custodianAccount, 60);
 
-  const [typeFilter, setTypeFilter] = useState<TokenizationRequest["assetType"] | "All">("All");
+  const [typeFilter, setTypeFilter] = useState<AssetTypeFilter>("All");
   const [statusFilter, setStatusFilter] = useState<RequestStatus | "all">("pending");
   const [searchTerm, setSearchTerm] = useState("");
   const [dateFilter, setDateFilter] = useState("");
@@ -84,7 +84,7 @@ const CustodianPage = () => {
 
   const enrichedRequests = useMemo<EnrichedRequest[]>(() => {
     return rawRequests.map((request) => {
-      const att = attestationByRequestCid.get(request.metadataCid);
+      const att = request.cid ? attestationByRequestCid.get(request.cid) : undefined;
       let status: RequestStatus = "pending";
       if (att) {
         status = att.status === "Verified" ? "approved" : att.status === "Invalid" ? "rejected" : "pending";
@@ -100,22 +100,28 @@ const CustodianPage = () => {
   const filteredRequests = useMemo(() => {
     const query = searchTerm.trim().toLowerCase();
     return enrichedRequests.filter((request) => {
-      if (typeFilter !== "All" && request.assetType !== typeFilter) {
+      const metadataType = request.assetType ?? "Unknown";
+      if (typeFilter !== "All" && metadataType !== typeFilter) {
         return false;
       }
       if (statusFilter !== "all" && request.status !== statusFilter) {
         return false;
       }
       if (dateFilter) {
-        const sameDay = request.submittedAt.slice(0, 10) === dateFilter;
+        const submitted = request.submittedAt ?? request.ts;
+        const sameDay = submitted ? submitted.slice(0, 10) === dateFilter : false;
         if (!sameDay) return false;
       }
       if (!query) return true;
-      return (
-        request.assetName.toLowerCase().includes(query) ||
-        request.metadataCid.toLowerCase().includes(query) ||
-        request.proofCid.toLowerCase().includes(query)
-      );
+      const candidates: Array<string | undefined> = [
+        request.assetName,
+        request.metadataCid ?? request.cid,
+        request.proofCid,
+        request.memoHashHex,
+        request.txHash,
+        request.from,
+      ];
+      return candidates.some((value) => value?.toLowerCase().includes(query));
     });
   }, [dateFilter, enrichedRequests, searchTerm, statusFilter, typeFilter]);
 
@@ -139,7 +145,14 @@ const CustodianPage = () => {
   const handleSubmission = async (attestation: Attestation) => {
     setSubmission(attestation);
     setSelectedRequest(null);
-    await Promise.all([paymentsResponse.mutate?.(), effectsResponse.mutate?.()]);
+    const refreshers = [
+      paymentsResponse.mutate?.(),
+      effectsResponse.mutate?.(),
+      refreshRequests ? refreshRequests() : undefined,
+    ].filter(Boolean) as Promise<unknown>[];
+    if (refreshers.length) {
+      await Promise.all(refreshers);
+    }
   };
 
   const walletAddress = custodianAccount;
@@ -182,9 +195,20 @@ const CustodianPage = () => {
                   </button>
                 ))}
               </div>
-              <span className="text-xs text-muted-foreground">
-                Tracking {enrichedRequests.length} on-chain request{enrichedRequests.length === 1 ? "" : "s"}
-              </span>
+              <div className="flex items-center gap-3">
+                <span className="text-xs text-muted-foreground">
+                  Tracking {enrichedRequests.length} on-chain request{enrichedRequests.length === 1 ? "" : "s"}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    void refreshRequests?.();
+                  }}
+                  className="rounded-full border border-border/50 px-3 py-1 text-xs font-medium text-foreground transition hover:border-primary/60 hover:text-primary"
+                >
+                  Rescan
+                </button>
+              </div>
             </div>
 
             <div className="mt-6 grid gap-3 text-xs text-muted-foreground sm:grid-cols-2 xl:grid-cols-4">
@@ -192,7 +216,7 @@ const CustodianPage = () => {
                 <label className="font-medium text-foreground">Type</label>
                 <select
                   value={typeFilter}
-                  onChange={(event) => setTypeFilter(event.target.value as TokenizationRequest["assetType"] | "All")}
+                  onChange={(event) => setTypeFilter(event.target.value as AssetTypeFilter)}
                   className="rounded-lg border border-border/50 bg-background px-3 py-2 text-sm text-foreground"
                 >
                   {assetTypeOptions.map((option) => (
@@ -235,10 +259,35 @@ const CustodianPage = () => {
               ) : (
                 filteredRequests.map((request) => {
                   const badgeClass = REQUEST_STATUS_BADGE[request.status];
-                  const isSelected = selectedRequest?.metadataCid === request.metadataCid;
+                  const selectedKey = selectedRequest
+                    ? selectedRequest.metadataCid ?? selectedRequest.memoHashHex ?? selectedRequest.txHash
+                    : null;
+                  const requestKey = request.metadataCid ?? request.memoHashHex ?? request.txHash;
+                  const isSelected = selectedKey != null && selectedKey === requestKey;
+                  const metadataLoaded = request.metadataStatus === "loaded" && request.metadata;
+                  const metadataError = request.metadataStatus === "error" ? request.metadataError : undefined;
+                  const isHashOnly = !request.cid && !!request.memoHashHex;
+                  const title = metadataLoaded
+                    ? request.metadata!.asset.name
+                    : isHashOnly
+                      ? "Request (hash-only)"
+                      : "Request";
+                  const issuerLabel = metadataLoaded ? request.issuer ?? request.from : request.from;
+                  const submittedAt = request.submittedAt ?? request.ts;
+                  const identifierLabel = request.cid ? "Memo CID" : "Memo Hash";
+                  const identifierValue = request.cid ?? request.memoHashHex ?? "";
+                  const proofValue = metadataLoaded ? request.proofCid : undefined;
+                  const proofLabel = metadataLoaded ? "Proof CID" : undefined;
+                  const valueDisplay = metadataLoaded
+                    ? formatUSD(request.valueUSD ?? 0)
+                    : `${request.amount} ${request.assetCode}`;
+                  const yieldDisplay =
+                    metadataLoaded && request.expectedYieldPct != null
+                      ? `Expected Yield ${request.expectedYieldPct}%`
+                      : `Asset ${request.assetCode}`;
                   return (
                     <div
-                      key={request.metadataCid}
+                      key={requestKey}
                       className={`rounded-xl border ${
                         isSelected ? "border-primary/60 bg-primary/5" : "border-border/50 bg-background/40"
                       } p-5 transition`}
@@ -246,29 +295,48 @@ const CustodianPage = () => {
                       <div className="flex flex-wrap items-start justify-between gap-4">
                         <div>
                           <div className="flex items-center gap-3">
-                            <h3 className="text-base font-semibold text-foreground">{request.assetName}</h3>
+                            <h3 className="text-base font-semibold text-foreground">{title}</h3>
                             <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${badgeClass}`}>
                               {REQUEST_STATUS_LABEL[request.status]}
                             </span>
                           </div>
                           <p className="mt-1 text-xs text-muted-foreground">
-                            Submitted {formatDate(request.submittedAt)} · Issuer {request.issuer}
+                            Submitted {formatDate(submittedAt)} · From {issuerLabel}
                           </p>
+                          {metadataError ? (
+                            <p className="mt-2 text-xs text-amber-400">
+                              Metadata unavailable ({metadataError}). You can proceed with attestation using memo reference.
+                            </p>
+                          ) : null}
+                          {request.metadataStatus === "missing" && !metadataLoaded ? (
+                            <p className="mt-2 text-xs text-muted-foreground">
+                              Hash-only reference detected. Provide attestation referencing the memo hash below.
+                            </p>
+                          ) : null}
                         </div>
                         <div className="text-right text-sm text-foreground">
-                          <p className="font-semibold">{formatUSD(request.valueUSD)}</p>
-                          <p className="text-xs text-muted-foreground">Expected Yield {request.expectedYieldPct ?? 0}%</p>
+                          <p className="font-semibold">{valueDisplay}</p>
+                          <p className="text-xs text-muted-foreground">{yieldDisplay}</p>
                         </div>
                       </div>
                       <div className="mt-4 grid gap-3 text-xs text-muted-foreground sm:grid-cols-2">
-                        <div className="space-y-1">
-                          <span className="font-medium text-foreground/80">Memo CID</span>
-                          <CopyHash value={request.metadataCid} />
-                        </div>
-                        <div className="space-y-1">
-                          <span className="font-medium text-foreground/80">Proof</span>
-                          <CopyHash value={request.proofCid} />
-                        </div>
+                        {identifierValue ? (
+                          <div className="space-y-1">
+                            <span className="font-medium text-foreground/80">{identifierLabel}</span>
+                            <CopyHash value={identifierValue} />
+                          </div>
+                        ) : null}
+                        {proofLabel && proofValue ? (
+                          <div className="space-y-1">
+                            <span className="font-medium text-foreground/80">{proofLabel}</span>
+                            <CopyHash value={proofValue} />
+                          </div>
+                        ) : (
+                          <div className="space-y-1">
+                            <span className="font-medium text-foreground/80">Transaction</span>
+                            <CopyHash value={request.txHash} />
+                          </div>
+                        )}
                       </div>
                       <div className="mt-4 flex flex-wrap items-center gap-3">
                         <button

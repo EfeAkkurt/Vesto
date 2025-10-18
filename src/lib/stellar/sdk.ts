@@ -12,7 +12,7 @@ export type StellarModule = {
 
 let cachedModule: StellarModule | null = null;
 
-export async function loadStellar(): Promise<StellarModule> {
+export async function loadSDK(): Promise<StellarModule> {
   if (cachedModule) return cachedModule;
   const sdk = (await import("stellar-sdk/minimal")) as Record<string, unknown>;
   const horizon = (sdk["Horizon"] ?? {}) as Record<string, unknown>;
@@ -31,3 +31,5 @@ export async function loadStellar(): Promise<StellarModule> {
   };
   return cachedModule;
 }
+
+export const loadStellar = loadSDK;
