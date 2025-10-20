@@ -46,6 +46,10 @@ export type ProofDiagnostics = {
   total: number;
   matched: number;
   unmatched: number;
+  verifiedCount: number;
+  recordedCount: number;
+  skippedCount: number;
+  cidFetchErrors: number;
   droppedByReason: Record<string, number>;
   samples: Array<{
     metadataCid: string;
@@ -79,7 +83,7 @@ const QUICK_CARD_DESCRIPTIONS: Record<ProofType, string> = {
 const PRIMARY_CARD_TYPES: ProofType[] = ["Audit Report", "Insurance Policy", "Legal Agreement"];
 
 const normalizeStatus = (status?: ProofStatus): ProofStatus => {
-  if (status === "Verified" || status === "Invalid") return status;
+  if (status === "Verified" || status === "Invalid" || status === "Recorded") return status;
   return "Pending";
 };
 
@@ -96,13 +100,6 @@ const stripExtension = (name?: string): string => {
 };
 
 const deriveSubtitle = (proof: StoredProof): string => stripExtension(proof.name) || "Untitled proof";
-
-const toProofStatus = (att?: Attestation | null): ProofStatus => {
-  if (!att) return "Pending";
-  if (att.status === "Invalid") return "Invalid";
-  if (att.status === "Verified") return "Verified";
-  return "Pending";
-};
 
 const buildAttestationMaps = (attestations: Attestation[]) => {
   const byCid = new Map<string, Attestation>();
@@ -124,12 +121,48 @@ const formatUploadedAt = (iso: string) => ({
   relative: formatRelativeTime(iso),
 });
 
+const toUpper = (value?: string | null): string => (value ?? "").trim().toUpperCase();
+
+const resolveJoinedAttestation = (
+  proof: { cid: string; metadataCid: string },
+  maps: ReturnType<typeof buildAttestationMaps>,
+  custodianAccountUpper: string,
+): Attestation | null => {
+  const candidates = new Set<Attestation>();
+  const byCidAtt = maps.byCid.get(proof.cid);
+  if (byCidAtt) candidates.add(byCidAtt);
+  const byMetadataAtt = maps.byMetadata.get(proof.metadataCid);
+  if (byMetadataAtt) candidates.add(byMetadataAtt);
+
+  for (const candidate of candidates) {
+    const signerUpper = toUpper(candidate.txSourceAccount ?? candidate.signedBy);
+    if (custodianAccountUpper && signerUpper !== custodianAccountUpper) {
+      continue;
+    }
+    const proofCid = (candidate.proofCid ?? candidate.ipfs?.hash ?? "").trim();
+    if (!proofCid) continue;
+    if (proofCid === proof.cid) {
+      return candidate;
+    }
+  }
+
+  return null;
+};
+
 export const buildProofList = (stored: StoredProof[], attestations: Attestation[]): ProofListItem[] => {
-  const { byCid, byMetadata } = buildAttestationMaps(attestations);
+  const maps = buildAttestationMaps(attestations);
+  const custodianAccountUpper = toUpper(process.env.NEXT_PUBLIC_CUSTODIAN_ACCOUNT);
+
   const list = stored.map<ProofListItem>((entry) => {
-    const attestation = byCid.get(entry.cid) ?? byMetadata.get(entry.metadataCid) ?? null;
-    const status = toProofStatus(attestation);
-    const uploaded = formatUploadedAt(entry.uploadedAt || attestation?.ts || new Date().toISOString());
+    const matched = resolveJoinedAttestation(entry, maps, custodianAccountUpper);
+    const status: ProofStatus = matched
+      ? matched.status === "Verified"
+        ? "Verified"
+        : matched.status === "Invalid"
+          ? "Invalid"
+          : "Recorded"
+      : "Pending";
+    const uploaded = formatUploadedAt(entry.uploadedAt || matched?.ts || new Date().toISOString());
     return {
       id: entry.metadataCid || entry.cid,
       type: entry.type,
@@ -143,14 +176,14 @@ export const buildProofList = (stored: StoredProof[], attestations: Attestation[
       uploadedAt: uploaded.iso,
       uploadedAtLabel: uploaded.label,
       status,
-      verifiedBy: attestation?.signedBy,
-      verifiedAt: attestation?.ts,
-      verifiedAtLabel: attestation?.ts ? formatDateTime(attestation.ts) : undefined,
-      txHash: attestation?.txHash,
+      verifiedBy: matched?.signedBy,
+      verifiedAt: matched?.ts,
+      verifiedAtLabel: matched?.ts ? formatDateTime(matched.ts) : undefined,
+      txHash: matched?.txHash,
       gatewayUrl: getViaGateway(entry.cid),
       size: entry.size,
       mime: entry.mime,
-      source: "local",
+      source: matched ? "attestation" : "local",
     };
   });
 
@@ -182,14 +215,22 @@ export const buildQuickCards = (proofs: ProofListItem[]): ProofQuickCard[] =>
   });
 
 export const buildDiagnostics = (proofs: ProofListItem[], attestations: Attestation[]): ProofDiagnostics => {
-  const { byCid, byMetadata } = buildAttestationMaps(attestations);
+  const maps = buildAttestationMaps(attestations);
+  const custodianAccountUpper = toUpper(process.env.NEXT_PUBLIC_CUSTODIAN_ACCOUNT);
   const dropped: Record<string, number> = {};
   let matched = 0;
+  let verifiedCount = 0;
+  let recordedCount = 0;
 
   proofs.forEach((proof) => {
-    const hasAttestation = byCid.has(proof.cid) || byMetadata.has(proof.metadataCid);
-    if (hasAttestation) {
+    const joined = resolveJoinedAttestation(proof, maps, custodianAccountUpper);
+    if (joined) {
       matched += 1;
+      if (joined.status === "Verified") {
+        verifiedCount += 1;
+      } else if (joined.status === "Recorded") {
+        recordedCount += 1;
+      }
     } else {
       dropped["no-attestation"] = (dropped["no-attestation"] ?? 0) + 1;
     }
@@ -202,14 +243,21 @@ export const buildDiagnostics = (proofs: ProofListItem[], attestations: Attestat
     metadataCid: item.metadataCid,
     cid: item.cid,
     status: item.status,
-    hasAttestation: Boolean(byCid.has(item.cid) || byMetadata.has(item.metadataCid)),
+    hasAttestation: Boolean(resolveJoinedAttestation(item, maps, custodianAccountUpper)),
   }));
+
+  const cidFetchErrors = attestations.filter((att) => att.metadataFetchFailed).length;
+  const skippedCount = proofs.length - matched;
 
   return {
     timestamp: new Date().toISOString(),
     total: proofs.length,
     matched,
     unmatched: proofs.length - matched,
+    verifiedCount,
+    recordedCount,
+    skippedCount,
+    cidFetchErrors,
     droppedByReason: dropped,
     samples,
   };

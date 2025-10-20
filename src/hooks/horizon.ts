@@ -59,6 +59,9 @@ export type HorizonPayment = {
     memo_type?: string;
     memo?: string;
     signatures?: string[];
+    fee_charged?: string;
+    source_account?: string;
+    memo_hash?: string | null;
   };
 };
 export type HorizonEffect = {
@@ -91,6 +94,9 @@ export type HorizonOperation = {
     memo_type?: string | null;
     memo?: string | null;
     signatures?: string[];
+    fee_charged?: string | null;
+    source_account?: string | null;
+    memo_hash?: string | null;
   };
   [key: string]: unknown;
 };

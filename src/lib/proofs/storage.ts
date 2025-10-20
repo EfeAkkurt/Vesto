@@ -3,7 +3,7 @@
 import { z } from "zod";
 import { PROOF_TYPE_OPTIONS, type ProofType } from "@/src/lib/types/proofs";
 
-export const PROOF_STORAGE_KEY = "vesto.proofs.v1";
+export const PROOF_STORAGE_KEY = "proofs:v1";
 
 const STORED_PROOF_SCHEMA = z.object({
   metadataCid: z.string().min(1),

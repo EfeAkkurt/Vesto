@@ -6,7 +6,6 @@ import { transitions, fadeInUp } from "@/src/components/motion/presets";
 import { LayoutShell } from "@/src/components/layout/LayoutShell";
 import { useWallet } from "@/src/hooks/useWallet";
 import { useNetworkHealth } from "@/src/hooks/useNetworkHealth";
-import { useToast } from "@/src/components/ui/Toast";
 import { CustodianInfo } from "@/src/components/custodian/CustodianInfo";
 import { UploadAttestation } from "@/src/components/custodian/UploadAttestation";
 import { AttestationTimeline } from "@/src/components/custodian/AttestationTimeline";
@@ -65,7 +64,6 @@ const maskAccountId = (value?: string) => {
 const CustodianPage = () => {
   const wallet = useWallet();
   const networkHealth = useNetworkHealth();
-  const { toast } = useToast();
   const prefersReducedMotion = useReducedMotion();
 
   const custodianAccount = wallet.accountId ?? CUSTODIAN_ACCOUNT;
@@ -156,6 +154,36 @@ const CustodianPage = () => {
 
   const pendingCount = enrichedRequests.filter((request) => request.status === "pending").length;
   const totalRequests = enrichedRequests.length;
+  const manageDataSignatureSummary = useMemo(() => {
+    const operations = operationsResponse.data ?? [];
+    const now = Date.now();
+    const windowStart = now - 30 * 24 * 60 * 60 * 1000;
+    let count = 0;
+    let lastTimestamp = 0;
+
+    operations.forEach((operation) => {
+      if (operation.type !== "manage_data") return;
+      const name = typeof operation.name === "string" ? operation.name : "";
+      if (name !== "vesto.attestation.cid" && name !== "vesto.attestation") return;
+      const created = new Date(operation.created_at).getTime();
+      if (Number.isNaN(created) || created < windowStart) return;
+      count += 1;
+      if (created > lastTimestamp) {
+        lastTimestamp = created;
+      }
+    });
+
+    return {
+      count,
+      lastTs: lastTimestamp > 0 ? new Date(lastTimestamp).toISOString() : undefined,
+    };
+  }, [operationsResponse.data]);
+
+  const latestAttestation = attestations[0];
+  const attestationSignatureCount = latestAttestation?.signatureCount ?? 0;
+  const totalSignatures =
+    attestationSignatureCount > 0 ? attestationSignatureCount : manageDataSignatureSummary.count;
+  const lastSignatureTimestamp = latestAttestation?.ts ?? manageDataSignatureSummary.lastTs;
 
   const [selectedRequest, setSelectedRequest] = useState<EnrichedRequest | null>(null);
   const [selectedAttestation, setSelectedAttestation] = useState<Attestation | null>(null);
@@ -610,22 +638,16 @@ const CustodianPage = () => {
             <CustodianInfo
               name="Stellar Prime Custody"
               wallet={walletAddress}
-              signatureCount={attestations.filter((att) => att.status === "Verified").length}
-              lastSignedAt={attestations.find((att) => att.status === "Verified")?.ts}
+              signatureCount={totalSignatures}
+              lastSignedAt={lastSignatureTimestamp}
             />
             <UploadAttestation
               accountId={wallet.accountId}
               connected={wallet.connected}
-              preferredDestination={custodianAccount}
               nextWeek={attestations[0]?.week ? attestations[0].week + 1 : 1}
               request={selectedRequest}
               onRequestCleared={() => setSelectedRequest(null)}
               onUploaded={(att) => {
-                toast({
-                  title: "Attestation submitted",
-                  description: `Week ${att.week} broadcasted to Horizon.`,
-                  variant: "success",
-                });
                 handleSubmission(att).catch(() => {
                   /* ignore */
                 });

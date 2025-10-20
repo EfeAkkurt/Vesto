@@ -10,12 +10,14 @@ import { formatDate } from "@/src/lib/utils/format";
 
 const STATUS_DOT_CLASS: Record<ProofStatus, string> = {
   Verified: "bg-emerald-400/80",
+  Recorded: "bg-sky-400/80",
   Pending: "bg-amber-400/80",
   Invalid: "bg-rose-500/80",
 };
 
 const STATUS_LABEL: Record<ProofStatus, string> = {
   Verified: "Verified",
+  Recorded: "Recorded",
   Pending: "Pending",
   Invalid: "Invalid",
 };
@@ -75,6 +77,8 @@ export const QuickAccessCards = ({ items, isLoading, className }: QuickAccessCar
         const statusToneClass =
           status === "Verified"
             ? "bg-emerald-500/10 text-emerald-300"
+            : status === "Recorded"
+              ? "bg-sky-400/15 text-sky-200"
             : status === "Invalid"
               ? "bg-rose-500/15 text-rose-300"
               : "bg-amber-400/10 text-amber-300";

@@ -3,6 +3,7 @@
 import { motion, useReducedMotion } from "framer-motion";
 import { CopyHash } from "@/src/components/ui/CopyHash";
 import type { Attestation } from "@/src/lib/types/proofs";
+import { MANAGE_DATA_SIGNATURE } from "@/src/lib/types/proofs";
 import { formatUSD, formatDate } from "@/src/lib/utils/format";
 
 export type AttestationTimelineProps = {
@@ -12,6 +13,7 @@ export type AttestationTimelineProps = {
 
 const statusStyles: Record<Attestation["status"], { dot: string; badge: string }> = {
   Verified: { dot: "bg-[#ADD015]", badge: "bg-primary/15 text-primary" },
+  Recorded: { dot: "bg-sky-400", badge: "bg-sky-400/15 text-sky-200" },
   Pending: { dot: "bg-amber-300", badge: "bg-amber-400/15 text-amber-200" },
   Invalid: { dot: "bg-rose-400", badge: "bg-rose-400/15 text-rose-300" },
 };
@@ -52,8 +54,13 @@ export const AttestationTimeline = ({ items, onOpen }: AttestationTimelineProps)
       >
         {items.map((item, index) => {
           const key = item.metadataCid || item.txHash || `${item.week}-${index}`;
-          const hasSignature = Boolean(item.signature);
+          const hasSignature = Boolean(item.signature && item.signature !== MANAGE_DATA_SIGNATURE);
           const styles = statusStyles[item.status];
+          const failureReason = item.metadataFailureReason
+            ? item.metadataFailureReason.length > 80
+              ? `${item.metadataFailureReason.slice(0, 77)}…`
+              : item.metadataFailureReason
+            : "";
           return (
             <motion.li
               key={key}
@@ -72,7 +79,18 @@ export const AttestationTimeline = ({ items, onOpen }: AttestationTimelineProps)
                   </p>
                   <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${styles.badge}`}>{item.status}</span>
                 </div>
-                <p className="text-xs text-muted-foreground">Signed on {formatDate(item.ts)} by {item.signedBy}</p>
+                <p className="text-xs text-muted-foreground">Signed on {formatDate(item.ts)}</p>
+                {item.signedBy || item.txSourceAccount || item.sigCount != null || item.signatureCount != null ? (
+                  <p className="text-xs text-muted-foreground">
+                    Signed by {(item.txSourceAccount ?? item.signedBy) || "—"} •{" "}
+                    {(item.sigCount ?? item.signatureCount ?? 0).toString()} sig
+                  </p>
+                ) : null}
+                {typeof item.feeXlm === "number" ? (
+                  <p className="text-xs text-muted-foreground">
+                    Fee: {item.feeXlm.toFixed(7)} XLM
+                  </p>
+                ) : null}
                 <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
                   <span className="font-medium text-foreground/80">File</span>
                   <CopyHash value={item.ipfs.hash} />
@@ -81,6 +99,11 @@ export const AttestationTimeline = ({ items, onOpen }: AttestationTimelineProps)
                   <span className="font-medium text-foreground/80">Metadata</span>
                   <CopyHash value={item.metadataCid} />
                 </div>
+                {item.metadataFetchFailed ? (
+                  <p className="text-[11px] text-amber-200">
+                    Metadata gateway fetch pending{failureReason ? ` · ${failureReason}` : ""}.
+                  </p>
+                ) : null}
                 {item.requestCid ? (
                   <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
                     <span className="font-medium text-foreground/80">Request CID</span>
@@ -89,7 +112,15 @@ export const AttestationTimeline = ({ items, onOpen }: AttestationTimelineProps)
                 ) : null}
                 <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
                   <span className="font-medium text-foreground/80">Signature</span>
-                  {hasSignature ? <CopyHash value={item.signature} /> : <span className="text-foreground/60">—</span>}
+                  {item.signature === MANAGE_DATA_SIGNATURE ? (
+                    <span className="rounded-full border border-primary/40 bg-primary/10 px-2 py-0.5 text-[11px] font-semibold text-primary">
+                      Manage data
+                    </span>
+                  ) : hasSignature ? (
+                    <CopyHash value={item.signature} />
+                  ) : (
+                    <span className="text-foreground/60">—</span>
+                  )}
                 </div>
                 <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
                   <span className="font-medium text-foreground/80">TxHash</span>

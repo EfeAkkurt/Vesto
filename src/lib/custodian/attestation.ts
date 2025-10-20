@@ -44,6 +44,9 @@ export const canonicalizeToCbor = (message: AttestationMsg): Uint8Array => {
 
 const textEncoder = typeof TextEncoder !== "undefined" ? new TextEncoder() : null;
 
+const encodeUtf8 = (value: string): Uint8Array =>
+  textEncoder?.encode(value) ?? Buffer.from(value, "utf8");
+
 export const serializeAttestationMessage = (message: AttestationMsg) => {
   const canonicalBytes = canonicalizeToCbor(message);
   const base64 = Buffer.from(canonicalBytes).toString("base64");
@@ -157,10 +160,25 @@ const hashCidToHex = async (cid: string): Promise<string> => {
   if (!normalized) {
     throw new Error("CID is required for attestation memo.");
   }
-  const encoder = new TextEncoder();
-  const cidBytes = encoder.encode(normalized);
+  const cidBytes = encodeUtf8(normalized);
   const digest = await digestSha256(cidBytes);
   return bytesToHex(digest);
+};
+
+const hexToBytes = (hex: string): Uint8Array => {
+  const normalized = hex.replace(/^0x/i, "");
+  if (normalized.length !== 64) {
+    throw new Error("Memo hash must be a 32-byte hex string.");
+  }
+  const bytes = new Uint8Array(normalized.length / 2);
+  for (let i = 0; i < normalized.length; i += 2) {
+    const byte = Number.parseInt(normalized.slice(i, i + 2), 16);
+    if (Number.isNaN(byte)) {
+      throw new Error("Memo hash contains invalid characters.");
+    }
+    bytes[i / 2] = byte;
+  }
+  return bytes;
 };
 
 type HorizonSubmitSuccess = {
@@ -215,7 +233,7 @@ const buildHorizonError = (status: number, payload: HorizonSubmitFailure | null,
   return error;
 };
 
-const submitSignedTransaction = async (serverUrl: string, signedTxXdr: string): Promise<string> => {
+export const submitSignedTransaction = async (serverUrl: string, signedTxXdr: string): Promise<string> => {
   const endpoint = `${serverUrl.replace(/\/$/, "")}/transactions`;
   const body = `tx=${encodeURIComponent(signedTxXdr)}`;
 
@@ -327,4 +345,107 @@ export const buildAndSubmitMemoTx = async ({
 
   const txHash = await submitSignedTransaction(horizonUrl, signedTxXdr);
   return { txHash };
+};
+
+type SubmitAttestationArgs = {
+  account: string;
+  metadataCid: string;
+  memoHashHex?: string;
+  networkPassphrase: string;
+  serverUrl: string;
+};
+
+export const submitAttestationTransaction = async ({
+  account,
+  metadataCid,
+  memoHashHex,
+  networkPassphrase,
+  serverUrl,
+}: SubmitAttestationArgs): Promise<{ txHash: string; signatureCount: number }> => {
+  const stellar = await loadStellar();
+  const { TransactionBuilder, Operation, Memo } = stellar as unknown as {
+    TransactionBuilder: typeof import("stellar-sdk").TransactionBuilder;
+    Operation: typeof import("stellar-sdk").Operation;
+    Memo: typeof import("stellar-sdk").Memo;
+  };
+
+  const trimmedAccount = account.trim();
+  if (!trimmedAccount) {
+    throw new Error("Custodian account is required.");
+  }
+
+  const metadataValue = metadataCid.trim();
+  if (!metadataValue) {
+    throw new Error("Metadata CID is required for attestation submission.");
+  }
+
+  const horizonUrl = serverUrl.replace(/\/$/, "");
+  if (!horizonUrl) {
+    throw new Error("Horizon server URL is required to submit attestation transactions.");
+  }
+
+  const envPassphrase = STELLAR_NETWORK_PASSPHRASE;
+  if (envPassphrase && envPassphrase !== networkPassphrase) {
+    throw new Error("Provided network passphrase does not match NEXT_PUBLIC_NETWORK_PASSPHRASE.");
+  }
+
+  const server = (await getHorizonServer()) as unknown as StellarServerLike;
+  const sourceAccount = await server.loadAccount(trimmedAccount);
+
+  const memoBytes = memoHashHex ? hexToBytes(memoHashHex) : await digestSha256(encodeUtf8(metadataValue));
+  if (memoBytes.length !== 32) {
+    throw new Error("Attestation memo hash must be 32 bytes.");
+  }
+
+  const manageDataBytes = Buffer.from(metadataValue, "utf8");
+  if (manageDataBytes.length > 64) {
+    throw new Error("Attestation metadata CID exceeds manage_data size limit.");
+  }
+
+  const tx = new TransactionBuilder(sourceAccount, {
+    fee: "100",
+    networkPassphrase,
+  })
+    .addOperation(
+      Operation.manageData({
+        name: "vesto.attestation.cid",
+        value: manageDataBytes,
+      }),
+    )
+    .addMemo(Memo.hash(Buffer.from(memoBytes)))
+    .setTimeout(60)
+    .build();
+
+  const useServerSigner = (process.env.NEXT_PUBLIC_ATTEST_SERVER ?? "").trim() === "1";
+
+  if (useServerSigner) {
+    const response = await fetch("/api/attestation/submit", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ xdr: tx.toXDR() }),
+    });
+
+    if (!response.ok) {
+      const errorPayload = await response.json().catch(() => ({}));
+      const message = typeof errorPayload?.error === "string" ? errorPayload.error : `Server attestation submission failed (${response.status})`;
+      throw new Error(message);
+    }
+
+    const payload = (await response.json()) as { hash?: string };
+    if (!payload.hash) {
+      throw new Error("Server response missing transaction hash.");
+    }
+    return { txHash: payload.hash, signatureCount: Math.max(1, tx.signatures?.length ?? 0) };
+  }
+
+  const { signedTxXdr } = await signTx(tx.toXDR(), {
+    networkPassphrase,
+    address: trimmedAccount,
+  });
+
+  const signedTx = TransactionBuilder.fromXDR(signedTxXdr, networkPassphrase);
+  const signatureCount = signedTx.signatures?.length ?? 0;
+
+  const txHash = await submitSignedTransaction(horizonUrl, signedTxXdr);
+  return { txHash, signatureCount: Math.max(1, signatureCount) };
 };

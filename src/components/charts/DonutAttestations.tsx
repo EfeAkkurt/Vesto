@@ -17,6 +17,7 @@ import { formatDate } from "@/src/lib/utils/format";
 
 const colors: Record<Attestation["status"], string> = {
   Verified: "var(--color-primary)",
+  Recorded: "rgba(56, 189, 248, 0.85)",
   Pending: "var(--color-muted)",
   Invalid: "var(--color-destructive)",
 };
@@ -33,7 +34,7 @@ type PieDatum = {
 };
 
 const buildSegments = (items: Attestation[]): PieDatum[] => {
-  const counts: Record<Attestation["status"], number> = { Verified: 0, Pending: 0, Invalid: 0 };
+  const counts: Record<Attestation["status"], number> = { Verified: 0, Recorded: 0, Pending: 0, Invalid: 0 };
   items.forEach((item) => {
     counts[item.status] = (counts[item.status] ?? 0) + 1;
   });

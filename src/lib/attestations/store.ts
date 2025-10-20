@@ -1,13 +1,12 @@
 import { Buffer } from "buffer";
-import { decode } from "cborg";
-import { z } from "zod";
 import { CID } from "multiformats/cid";
-import { AttestationMetadataSchema } from "@/src/lib/custodian/schema";
+import { mutate } from "swr";
 import type { HorizonEffect, HorizonOperation, HorizonPayment } from "@/src/hooks/horizon";
+import { MANAGE_DATA_SIGNATURE } from "@/src/lib/types/proofs";
 import type { Attestation } from "@/src/lib/types/proofs";
 import { IPFS_GATEWAY } from "@/src/utils/constants";
 import { extractMemoCid, memoHashB64ToHex } from "@/src/lib/horizon/memos";
-import { verifyAttestationSignature, type SignatureBundle } from "@/src/lib/attestations/verify";
+import { verifyAttestation } from "@/src/lib/attestations/verify";
 
 const ipfsBase = IPFS_GATEWAY.replace(/\/$/, "");
 const absoluteUrlPattern = /^https?:\/\//i;
@@ -20,65 +19,8 @@ const buildGatewayUrl = (value: string): string => {
   return `${ipfsBase}/${stripped}`;
 };
 
-const sharedTextDecoder = typeof TextDecoder !== "undefined" ? new TextDecoder() : null;
-const bytesToUtf8 = (bytes: Uint8Array): string =>
-  sharedTextDecoder ? sharedTextDecoder.decode(bytes) : Buffer.from(bytes).toString("utf8");
-
-const parseMetadataBody = (response: Response, bytes: Uint8Array): unknown => {
-  if (bytes.byteLength === 0) {
-    throw new Error("Empty attestation metadata response.");
-  }
-
-  const contentType = response.headers.get("content-type")?.toLowerCase() ?? "";
-
-  if (contentType.includes("application/json") || contentType.includes("text/")) {
-    const text = bytesToUtf8(bytes);
-    return JSON.parse(text);
-  }
-
-  try {
-    return decode(bytes);
-  } catch {
-    const text = bytesToUtf8(bytes);
-    try {
-      return JSON.parse(text);
-    } catch {
-      throw new Error("Failed to parse attestation metadata payload.");
-    }
-  }
-};
-
-const MetadataEnvelopeExtrasSchema = z.object({
-  nonce: z.string().optional(),
-  signature: z.string().optional(),
-  publicKey: z.string().optional(),
-  signedBy: z.string().optional(),
-  requestCid: z.string().optional(),
-  request: z
-    .object({
-      cid: z.string().min(1),
-    })
-    .optional(),
-  attestation: z
-    .object({
-      nonce: z.string().optional(),
-      signature: z.string().optional(),
-      publicKey: z.string().optional(),
-      signedBy: z.string().optional(),
-      requestCid: z.string().optional(),
-      message: z.string().optional(),
-    })
-    .optional(),
-});
-
-type MetadataEnvelopeExtras = z.infer<typeof MetadataEnvelopeExtrasSchema>;
-
-type MetadataEnvelope = {
-  metadata: z.infer<typeof AttestationMetadataSchema>;
-  extras: MetadataEnvelopeExtras;
-};
-
-const metadataCache = new Map<string, Promise<MetadataEnvelope>>();
+const REVALIDATION_DELAY_MS = 10_000;
+const revalidationTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
 const normaliseCid = (raw?: string | null): string | null => {
   if (!raw) return null;
@@ -91,88 +33,6 @@ const normaliseCid = (raw?: string | null): string | null => {
   }
 };
 
-const coerceNumber = (value: unknown): number | undefined => {
-  if (typeof value === "number" && Number.isFinite(value)) return value;
-  if (typeof value === "string") {
-    const parsed = Number.parseFloat(value);
-    return Number.isFinite(parsed) ? parsed : undefined;
-  }
-  return undefined;
-};
-
-const parseMetadata = (raw: unknown): MetadataEnvelope => {
-  if (!raw || typeof raw !== "object") {
-    throw new Error("Invalid attestation metadata payload");
-  }
-
-  const base = raw as Record<string, unknown>;
-  const candidate: Record<string, unknown> = { ...base };
-
-  const coercedWeek = coerceNumber(candidate.week);
-  if (coercedWeek != null) candidate.week = Math.trunc(coercedWeek);
-
-  const coercedReserve = coerceNumber(candidate.reserveAmount);
-  if (coercedReserve != null) candidate.reserveAmount = coercedReserve;
-
-  const coercedSize = coerceNumber(candidate.size);
-  if (coercedSize != null) candidate.size = coercedSize;
-
-  const metadata = AttestationMetadataSchema.parse(candidate);
-  const extras = MetadataEnvelopeExtrasSchema.parse(raw);
-
-  return { metadata, extras };
-};
-
-const FALLBACK_GATEWAYS = [
-  (process.env.NEXT_PUBLIC_IPFS_GATEWAY ?? "").trim(),
-  (process.env.IPFS_GATEWAY ?? "").trim(),
-  "https://gateway.lighthouse.storage/ipfs/",
-  "https://ipfs.io/ipfs/",
-  "https://cloudflare-ipfs.com/ipfs/",
-].filter((value, index, array) => value.length > 0 && array.indexOf(value) === index);
-
-const buildFallbackUrls = (cid: string): string[] =>
-  FALLBACK_GATEWAYS.map((gateway) => {
-    const normalised = gateway.endsWith("/") ? gateway.slice(0, -1) : gateway;
-    return `${normalised}/${cid}`;
-  });
-
-const fetchMetadataEnvelope = async (cid: string): Promise<MetadataEnvelope> => {
-  if (!metadataCache.has(cid)) {
-    metadataCache.set(
-      cid,
-      (async () => {
-        const urls = buildFallbackUrls(cid);
-        const errors: Error[] = [];
-
-        for (const url of urls) {
-          try {
-            const response = await fetch(url, {
-              headers: { Accept: "application/json, application/cbor" },
-            });
-            if (!response.ok) {
-              errors.push(new Error(`Gateway ${url} responded ${response.status}`));
-              continue;
-            }
-            const arrayBuffer = await response.arrayBuffer();
-            const body = parseMetadataBody(response, new Uint8Array(arrayBuffer));
-            return parseMetadata(body);
-          } catch (error) {
-            errors.push(error instanceof Error ? error : new Error(String(error)));
-          }
-        }
-
-        const message =
-          errors.length > 0
-            ? `Failed to fetch attestation metadata for ${cid}: ${errors[errors.length - 1]?.message ?? "unknown error"}`
-            : `Failed to fetch attestation metadata for ${cid}`;
-        throw new Error(message);
-      })(),
-    );
-  }
-  return metadataCache.get(cid)!;
-};
-
 const isAccountDataEffect = (effect: HorizonEffect): effect is HorizonEffect & { value: string } =>
   (effect.type === "data_created" || effect.type === "data_updated") && typeof effect.value === "string";
 
@@ -182,6 +42,8 @@ type EffectBundle = {
   publicKey?: string;
   nonce?: string;
   requestCid?: string;
+  manageDataName?: string;
+  metadataError?: string;
 };
 
 const mergeEffectBundle = (existing: EffectBundle | undefined, incoming: EffectBundle): EffectBundle => ({
@@ -190,6 +52,8 @@ const mergeEffectBundle = (existing: EffectBundle | undefined, incoming: EffectB
   publicKey: incoming.publicKey ?? existing?.publicKey,
   nonce: incoming.nonce ?? existing?.nonce,
   requestCid: incoming.requestCid ?? existing?.requestCid,
+  manageDataName: incoming.manageDataName ?? existing?.manageDataName,
+  metadataError: incoming.metadataError ?? existing?.metadataError,
 });
 
 const buildEffectBundles = (effects: HorizonEffect[]): Map<string, EffectBundle> => {
@@ -245,50 +109,70 @@ const mergeManageDataBundles = (
     const txHash = operation.transaction_hash;
     if (!txHash) continue;
     const rawValue = typeof operation.value === "string" ? operation.value : null;
-    if (!rawValue) continue;
-    const decoded = Buffer.from(rawValue, "base64").toString("utf8");
-    let metadataCidRaw: string | undefined;
-    let signatureString: string | undefined;
-    let publicKey: string | undefined;
-    let nonce: string | undefined;
-    let requestCid: string | undefined;
+    const bundle: EffectBundle = {
+      manageDataName: typeof operation.name === "string" ? operation.name : undefined,
+    };
 
-    try {
-      const parsed = JSON.parse(decoded) as Record<string, unknown>;
-      const attestationExtras = (parsed.attestation ?? {}) as Record<string, unknown>;
-      metadataCidRaw =
-        (typeof parsed.metadataCid === "string" && parsed.metadataCid) ||
-        (typeof attestationExtras.metadataCid === "string" && attestationExtras.metadataCid) ||
-        undefined;
-      signatureString =
-        (typeof parsed.signature === "string" && parsed.signature) ||
-        (typeof attestationExtras.signature === "string" && attestationExtras.signature) ||
-        undefined;
-      publicKey =
-        (typeof parsed.publicKey === "string" && parsed.publicKey) ||
-        (typeof parsed.signedBy === "string" && parsed.signedBy) ||
-        (typeof attestationExtras.publicKey === "string" && attestationExtras.publicKey) ||
-        (typeof attestationExtras.signedBy === "string" && attestationExtras.signedBy) ||
-        undefined;
-      nonce =
-        (typeof parsed.nonce === "string" && parsed.nonce) ||
-        (typeof attestationExtras.nonce === "string" && attestationExtras.nonce) ||
-        undefined;
-      requestCid =
-        (typeof parsed.requestCid === "string" && parsed.requestCid) ||
-        (typeof attestationExtras.requestCid === "string" && attestationExtras.requestCid) ||
-        undefined;
-    } catch {
-      metadataCidRaw = decoded;
+    if (rawValue) {
+      let decoded: string | null = null;
+      try {
+        const buffer = Buffer.from(rawValue, "base64");
+        const normalisedInput = rawValue.replace(/=+$/u, "");
+        const normalisedOutput = buffer.toString("base64").replace(/=+$/u, "");
+        if (normalisedOutput !== normalisedInput) {
+          throw new Error("Invalid base64 payload for manage_data value");
+        }
+        decoded = buffer.toString("utf8");
+      } catch (error) {
+        bundle.metadataError = error instanceof Error ? error.message : "Failed to decode manage_data value";
+      }
+
+      if (decoded) {
+        let metadataCidRaw: string | undefined;
+        let signatureString: string | undefined;
+        let publicKey: string | undefined;
+        let nonce: string | undefined;
+        let requestCid: string | undefined;
+
+        try {
+          const parsed = JSON.parse(decoded) as Record<string, unknown>;
+          const attestationExtras = (parsed.attestation ?? {}) as Record<string, unknown>;
+          metadataCidRaw =
+            (typeof parsed.metadataCid === "string" && parsed.metadataCid) ||
+            (typeof attestationExtras.metadataCid === "string" && attestationExtras.metadataCid) ||
+            undefined;
+          signatureString =
+            (typeof parsed.signature === "string" && parsed.signature) ||
+            (typeof attestationExtras.signature === "string" && attestationExtras.signature) ||
+            undefined;
+          publicKey =
+            (typeof parsed.publicKey === "string" && parsed.publicKey) ||
+            (typeof parsed.signedBy === "string" && parsed.signedBy) ||
+            (typeof attestationExtras.publicKey === "string" && attestationExtras.publicKey) ||
+            (typeof attestationExtras.signedBy === "string" && attestationExtras.signedBy) ||
+            undefined;
+          nonce =
+            (typeof parsed.nonce === "string" && parsed.nonce) ||
+            (typeof attestationExtras.nonce === "string" && attestationExtras.nonce) ||
+            undefined;
+          requestCid =
+            (typeof parsed.requestCid === "string" && parsed.requestCid) ||
+            (typeof attestationExtras.requestCid === "string" && attestationExtras.requestCid) ||
+            undefined;
+        } catch {
+          metadataCidRaw = decoded;
+        }
+
+        if (metadataCidRaw) {
+          bundle.metadataCid = normaliseCid(metadataCidRaw) ?? metadataCidRaw;
+        }
+        bundle.signatureString = signatureString;
+        bundle.publicKey = publicKey;
+        bundle.nonce = nonce;
+        bundle.requestCid = requestCid;
+      }
     }
 
-    const bundle: EffectBundle = {
-      metadataCid: metadataCidRaw ? normaliseCid(metadataCidRaw) ?? metadataCidRaw : undefined,
-      signatureString,
-      publicKey,
-      nonce,
-      requestCid,
-    };
     const merged = mergeEffectBundle(effectBundles.get(txHash), bundle);
     effectBundles.set(txHash, merged);
   }
@@ -383,76 +267,6 @@ const buildPaymentsFromOperations = (operations: HorizonOperation[]): PaymentExt
   return { payments, memoHashByTx };
 };
 
-const decodeSignature = (value: string): Uint8Array | null => {
-  if (/^[0-9a-fA-F]+$/.test(value) && value.length % 2 === 0) {
-    const bytes = new Uint8Array(value.length / 2);
-    for (let i = 0; i < value.length; i += 2) {
-      bytes[i / 2] = Number.parseInt(value.slice(i, i + 2), 16);
-    }
-    return bytes;
-  }
-  try {
-    return new Uint8Array(Buffer.from(value, "base64"));
-  } catch {
-    return null;
-  }
-};
-
-const bytesToBase64 = (bytes: Uint8Array): string => Buffer.from(bytes).toString("base64");
-
-const deriveSignatureBundle = (
-  envelope: MetadataEnvelope,
-  payment: HorizonPayment,
-  effectBundle?: EffectBundle,
-): SignatureBundle => {
-  const { metadata, extras } = envelope;
-
-  const attestationExtras = extras.attestation ?? {};
-  const signatureCandidate =
-    attestationExtras.signature ?? extras.signature ?? undefined;
-  const messageCandidate =
-    attestationExtras.message ?? (extras as { message?: unknown }).message ?? undefined;
-
-  const publicKeyCandidate =
-    attestationExtras.publicKey ??
-    attestationExtras.signedBy ??
-    extras.publicKey ??
-    extras.signedBy ??
-    payment.source_account ??
-    payment.from;
-
-  const nonceCandidate = attestationExtras.nonce ?? extras.nonce;
-
-  const signatureString = effectBundle?.signatureString ?? signatureCandidate;
-  const publicKey = effectBundle?.publicKey ?? publicKeyCandidate ?? metadata.issuer;
-  const nonce = effectBundle?.nonce ?? nonceCandidate;
-  const requestCid =
-    effectBundle?.requestCid ??
-    attestationExtras.requestCid ??
-    extras.requestCid ??
-    extras.request?.cid ??
-    undefined;
-
-  const signatureBytes = signatureString ? decodeSignature(signatureString) ?? undefined : undefined;
-
-  return {
-    signatureString,
-    signatureBytes,
-    publicKey: publicKey ?? undefined,
-    nonce: nonce ?? undefined,
-    requestCid,
-    messageBase64: typeof messageCandidate === "string" ? messageCandidate : undefined,
-  };
-};
-
-const determineStatus = async (
-  metadata: z.infer<typeof AttestationMetadataSchema>,
-  bundle: SignatureBundle,
-): Promise<Attestation["status"]> => {
-  const outcome = await verifyAttestationSignature(metadata, bundle);
-  return outcome.status;
-};
-
 type AttestationCandidate = {
   payment: HorizonPayment;
   metadataCid: string;
@@ -464,45 +278,98 @@ const buildAttestation = async (
   effectBundle?: EffectBundle,
 ): Promise<Attestation | null> => {
   try {
-    const envelope = await fetchMetadataEnvelope(candidate.metadataCid);
-    const bundle = deriveSignatureBundle(envelope, candidate.payment, effectBundle);
-    const status = await determineStatus(envelope.metadata, bundle);
-    const signature = bundle.signatureBytes
-      ? bytesToBase64(bundle.signatureBytes)
-      : bundle.signatureString ?? "";
-    const signedBy =
-      bundle.publicKey ??
-      envelope.metadata.issuer ??
+    const strictVerify = (process.env.NEXT_PUBLIC_STRICT_VERIFY ?? "").trim() === "1";
+    const txAttr = candidate.payment.transaction_attr;
+    const feeXlm =
+      txAttr?.fee_charged != null ? Number(txAttr.fee_charged) / 1e7 : undefined;
+    const sigCount = txAttr?.signatures?.length ?? undefined;
+    const txSourceAccount =
+      txAttr?.source_account ??
       candidate.payment.source_account ??
       candidate.payment.from ??
+      null;
+
+    const verifyResult = await verifyAttestation(
+      {
+        metadataCid: candidate.metadataCid,
+        proofCid: effectBundle?.metadataCid ?? undefined,
+        memoHashHex: candidate.memoHashHex ?? null,
+        requestCid: effectBundle?.requestCid ?? undefined,
+        requestMemoHashHex: candidate.memoHashHex ?? undefined,
+      },
+      { strict: strictVerify },
+    );
+
+    const metadata = verifyResult.metadata ?? null;
+    const fileCid =
+      metadata?.fileCid ??
+      metadata?.proofCid ??
+      candidate.metadataCid;
+    const reserveAmount = metadata?.reserveAmount ?? 0;
+    const week = metadata?.week ?? 0;
+    const timestamp =
+      metadata?.timestamp ??
+      candidate.payment.created_at;
+    const signatureString =
+      effectBundle?.signatureString ??
+      metadata?.attestation?.signature ??
+      MANAGE_DATA_SIGNATURE;
+    const signatureType: Attestation["signatureType"] =
+      signatureString.toUpperCase() === MANAGE_DATA_SIGNATURE ? "manageData" : "ed25519";
+    const signedBy =
+      metadata?.attestation?.signedBy ??
+      metadata?.issuer ??
+      effectBundle?.publicKey ??
+      txSourceAccount ??
       "";
+    const nonce =
+      effectBundle?.nonce ??
+      metadata?.attestation?.nonce ??
+      "";
+    const requestCid =
+      effectBundle?.requestCid ??
+      metadata?.request?.cid ??
+      metadata?.attestation?.requestCid;
 
     return {
-      week: envelope.metadata.week,
-      reserveUSD: envelope.metadata.reserveAmount,
+      week,
+      reserveUSD: reserveAmount,
       ipfs: {
-        hash: envelope.metadata.fileCid,
-        url: buildGatewayUrl(envelope.metadata.fileCid),
+        hash: fileCid,
+        url: buildGatewayUrl(fileCid),
+        mime: metadata?.mime,
+        size: metadata?.size,
       },
       metadataCid: candidate.metadataCid,
+      proofCid: metadata?.proofCid,
       memoHashHex: candidate.memoHashHex,
       signedBy,
-      signature,
-      signatureType: "ed25519",
-      nonce: bundle.nonce ?? "",
-      status,
-      ts: envelope.metadata.timestamp,
+      signature: signatureString,
+      signatureType,
+      nonce,
+      status: verifyResult.status,
+      ts: timestamp,
       txHash: candidate.payment.transaction_hash,
-      requestCid: bundle.requestCid,
+      requestCid: requestCid ?? undefined,
+      signatureCount: sigCount ?? 0,
+      metadataFetchFailed: verifyResult.status === "Recorded" && !metadata,
+      metadataFailureReason: verifyResult.reason,
+      feeXlm,
+      sigCount,
+      txSourceAccount: txSourceAccount ?? undefined,
+      requestMemoHashHex: candidate.memoHashHex,
     } satisfies Attestation;
-  } catch {
-    const fallbackSignedBy =
+  } catch (error) {
+    const txAttr = candidate.payment.transaction_attr;
+    const sigCount = txAttr?.signatures?.length ?? undefined;
+    const feeXlm =
+      txAttr?.fee_charged != null ? Number(txAttr.fee_charged) / 1e7 : undefined;
+    const txSourceAccount =
+      txAttr?.source_account ??
       candidate.payment.source_account ??
       candidate.payment.from ??
-      effectBundle?.publicKey ??
-      "";
-    const fallbackSignature = effectBundle?.signatureString ?? "";
-    const fallbackNonce = effectBundle?.nonce ?? "";
+      undefined;
+
     return {
       week: 0,
       reserveUSD: 0,
@@ -512,14 +379,25 @@ const buildAttestation = async (
       },
       metadataCid: candidate.metadataCid,
       memoHashHex: candidate.memoHashHex,
-      signedBy: fallbackSignedBy,
-      signature: fallbackSignature,
-      signatureType: "ed25519",
-      nonce: fallbackNonce,
-      status: "Pending",
+      signedBy: txSourceAccount ?? effectBundle?.publicKey ?? "",
+      signature: effectBundle?.signatureString ?? MANAGE_DATA_SIGNATURE,
+      signatureType:
+        (effectBundle?.signatureString ?? MANAGE_DATA_SIGNATURE).toUpperCase() === MANAGE_DATA_SIGNATURE
+          ? "manageData"
+          : "ed25519",
+      nonce: effectBundle?.nonce ?? "",
+      status: "Recorded",
       ts: candidate.payment.created_at,
       txHash: candidate.payment.transaction_hash,
       requestCid: effectBundle?.requestCid,
+      signatureCount: sigCount ?? 0,
+      metadataFetchFailed: true,
+      metadataFailureReason:
+        error instanceof Error ? error.message : "metadata-fetch-failed",
+      feeXlm,
+      sigCount,
+      txSourceAccount,
+      requestMemoHashHex: candidate.memoHashHex,
     } satisfies Attestation;
   }
 };
@@ -558,6 +436,34 @@ const dedupeCandidates = (
   return Array.from(map.values());
 };
 
+const scheduleRevalidations = (attestations: Attestation[]) => {
+  attestations.forEach((att) => {
+    const existing = revalidationTimers.get(att.metadataCid);
+    if (att.status === "Verified" || att.status === "Invalid") {
+      if (existing) {
+        clearTimeout(existing);
+        revalidationTimers.delete(att.metadataCid);
+      }
+      return;
+    }
+    if (att.status !== "Recorded") {
+      return;
+    }
+    if (existing) {
+      return;
+    }
+    const timer = setTimeout(async () => {
+      revalidationTimers.delete(att.metadataCid);
+      try {
+        await Promise.all([mutate("proofs:list"), mutate("dashboard:attestations")]);
+      } catch {
+        // swallow mutate errors
+      }
+    }, REVALIDATION_DELAY_MS);
+    revalidationTimers.set(att.metadataCid, timer);
+  });
+};
+
 export const resolveAttestations = async (
   operations?: HorizonOperation[],
   effects?: HorizonEffect[],
@@ -573,7 +479,11 @@ export const resolveAttestations = async (
       buildAttestation(candidate, candidate.payment.transaction_hash ? effectBundles.get(candidate.payment.transaction_hash) : undefined),
     ),
   );
-  return resolved
+  const attestations = resolved
     .filter((item): item is Attestation => item !== null)
     .sort((a, b) => new Date(b.ts).getTime() - new Date(a.ts).getTime());
+
+  scheduleRevalidations(attestations);
+
+  return attestations;
 };

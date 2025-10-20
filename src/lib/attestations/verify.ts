@@ -1,154 +1,153 @@
-import { Buffer } from "buffer";
-import { sha256 } from "@noble/hashes/sha256";
-import { serializeAttestationMessage, verifyEd25519 } from "@/src/lib/custodian/attestation";
-import type { AttestationMetadata } from "@/src/lib/custodian/schema";
-import { rawPublicKeyFromAddress } from "@/src/lib/stellar/keys";
+import { decode as decodeCbor } from "cborg";
+import { AttestationMetadataSchema, type AttestationMetadata } from "@/src/lib/custodian/schema";
+import { getViaGateway } from "@/src/lib/ipfs/client";
 
-const textEncoder = typeof TextEncoder !== "undefined" ? new TextEncoder() : null;
-
-const encodeText = (value: string): Uint8Array => {
-  if (!textEncoder) {
-    return Buffer.from(value, "utf8");
-  }
-  return textEncoder.encode(value);
+export type VerifyAttestationContext = {
+  metadataCid: string;
+  proofCid?: string | null;
+  memoHashHex?: string | null;
+  requestCid?: string | null;
+  requestMemoHashHex?: string | null;
 };
 
-const tryDecodeBase64 = (value: string): Uint8Array | null => {
-  try {
-    return Buffer.from(value, "base64");
-  } catch {
-    return null;
-  }
+export type VerifyAttestationOptions = {
+  strict?: boolean;
+  now?: number;
 };
 
-const hashSep23 = (payload: Uint8Array): Uint8Array => {
-  const prefixBytes = encodeText("Stellar Signed Message:\n");
-  const lengthBytes = new Uint8Array(4);
-  new DataView(lengthBytes.buffer).setUint32(0, payload.length, true);
-  const combined = new Uint8Array(prefixBytes.length + lengthBytes.length + payload.length);
-  combined.set(prefixBytes, 0);
-  combined.set(lengthBytes, prefixBytes.length);
-  combined.set(payload, prefixBytes.length + lengthBytes.length);
-  return Uint8Array.from(sha256(combined));
+export type VerifyAttestationResult = {
+  status: "Verified" | "Recorded" | "Invalid";
+  metadata?: AttestationMetadata;
+  reason?: string;
 };
 
-const hashSha256 = (payload: Uint8Array): Uint8Array => Uint8Array.from(sha256(payload));
+const metadataCache = new Map<string, Promise<AttestationMetadata>>();
+const headStatusCache = new Map<string, Promise<number>>();
 
-export type SignatureBundle = {
-  signatureString?: string;
-  signatureBytes?: Uint8Array;
-  publicKey?: string;
-  nonce?: string;
-  requestCid?: string;
-  messageBase64?: string;
-};
-
-export type VerificationCandidate = {
-  source: string;
-  bytes: Uint8Array;
-};
-
-const dedupeCandidates = (candidates: VerificationCandidate[]): VerificationCandidate[] => {
-  const seen = new Set<string>();
-  const result: VerificationCandidate[] = [];
-  for (const candidate of candidates) {
-    const key = Buffer.from(candidate.bytes).toString("base64");
-    if (seen.has(key)) continue;
-    seen.add(key);
-    result.push(candidate);
-  }
-  return result;
-};
-
-export const buildVerificationCandidates = (
-  metadata: AttestationMetadata,
-  bundle: SignatureBundle,
-): VerificationCandidate[] => {
-  const candidates: VerificationCandidate[] = [];
-  const messageBase64 = bundle.messageBase64?.trim();
-
-  const registerCandidate = (source: string, bytes: Uint8Array | null | undefined) => {
-    if (!bytes || bytes.length === 0) return;
-    candidates.push({ source, bytes });
-    candidates.push({ source: `${source}:sep23`, bytes: hashSep23(bytes) });
-    candidates.push({ source: `${source}:sha256`, bytes: hashSha256(bytes) });
-  };
-
-  if (messageBase64) {
-    registerCandidate("bundle:message-text", encodeText(messageBase64));
-    registerCandidate("bundle:message-bytes", tryDecodeBase64(messageBase64));
-  }
-
-  if (bundle.nonce) {
-    try {
-      const message = {
-        week: metadata.week,
-        reserveAmount: metadata.reserveAmount,
-        timestamp: metadata.timestamp,
-        nonce: bundle.nonce,
-      };
-      const { base64, textBytes, canonicalBytes } = serializeAttestationMessage(message);
-      registerCandidate("metadata:serialized-text", textBytes);
-      registerCandidate("metadata:canonical-bytes", canonicalBytes);
-      if (!messageBase64 || messageBase64 !== base64) {
-        registerCandidate("metadata:serialized-bytes", tryDecodeBase64(base64));
+const fetchHeadStatus = async (cid: string): Promise<number> => {
+  if (!headStatusCache.has(cid)) {
+    const promise = (async () => {
+      try {
+        const url = getViaGateway(cid);
+        const response = await fetch(url, { method: "HEAD" });
+        return response.status;
+      } catch {
+        return 0;
       }
-    } catch {
-      // Ignore serialization issues; verification will fall back to bundle data.
+    })();
+    promise
+      .then((status) => {
+        if (status === 0 || status >= 400) {
+          headStatusCache.delete(cid);
+        }
+      })
+      .catch(() => {
+        headStatusCache.delete(cid);
+      });
+    headStatusCache.set(cid, promise);
+  }
+  return headStatusCache.get(cid)!;
+};
+
+const decodeBytes = (bytes: Uint8Array): unknown => {
+  try {
+    const text = new TextDecoder().decode(bytes);
+    return JSON.parse(text);
+  } catch {
+    try {
+      return decodeCbor(bytes);
+    } catch (error) {
+      throw error instanceof Error ? error : new Error("Failed to decode attestation metadata");
     }
   }
-
-  return dedupeCandidates(candidates);
 };
 
-export type VerificationOutcome =
-  | { status: "Pending"; reason?: string }
-  | { status: "Verified"; matched: string }
-  | { status: "Invalid"; reason: string };
-
-export const verifyAttestationSignature = async (
-  metadata: AttestationMetadata,
-  bundle: SignatureBundle,
-): Promise<VerificationOutcome> => {
-  if (!bundle.signatureBytes || !bundle.publicKey || !bundle.nonce) {
-    const hasSignature = Boolean(bundle.signatureString);
-    return {
-      status: "Pending",
-      reason: hasSignature ? "Awaiting attestation nonce or signer details" : "Awaiting attestation signature",
-    };
-  }
-
-  let publicKeyRaw: Uint8Array;
-  try {
-    publicKeyRaw = rawPublicKeyFromAddress(bundle.publicKey);
-  } catch {
-    return {
-      status: "Invalid",
-      reason: "Invalid signer public key",
-    };
-  }
-
-  const candidates = buildVerificationCandidates(metadata, bundle);
-  if (!candidates.length) {
-    return {
-      status: "Pending",
-      reason: "No verification payloads available yet",
-    };
-  }
-
-  for (const candidate of candidates) {
-    try {
-      const verified = await verifyEd25519(publicKeyRaw, candidate.bytes, bundle.signatureBytes);
-      if (verified) {
-        return { status: "Verified", matched: candidate.source };
+const fetchMetadata = async (cid: string): Promise<AttestationMetadata> => {
+  if (!metadataCache.has(cid)) {
+    const promise = (async () => {
+      const url = getViaGateway(cid);
+      const response = await fetch(url, {
+        headers: { Accept: "application/json, application/cbor" },
+      });
+      if (!response.ok) {
+        throw new Error(`Failed to fetch metadata (${response.status})`);
       }
-    } catch {
-      // Ignore individual candidate errors; try the next candidate.
-    }
+      const buffer = await response.arrayBuffer();
+      const parsed = decodeBytes(new Uint8Array(buffer));
+      return AttestationMetadataSchema.parse(parsed);
+    })();
+    promise.catch(() => {
+      metadataCache.delete(cid);
+    });
+    metadataCache.set(cid, promise);
+  }
+  return metadataCache.get(cid)!;
+};
+
+const equalsIgnoreCase = (a?: string | null, b?: string | null): boolean => {
+  if (!a || !b) return false;
+  return a.trim().toLowerCase() === b.trim().toLowerCase();
+};
+
+const matchesJoinRule = (
+  metadata: AttestationMetadata,
+  context: VerifyAttestationContext,
+): boolean => {
+  const proofCidMatch = Boolean(
+    metadata.proofCid &&
+      context.proofCid &&
+      equalsIgnoreCase(metadata.proofCid, context.proofCid),
+  );
+
+  const requestCidMatch = Boolean(
+    metadata.request?.cid &&
+      context.requestCid &&
+      equalsIgnoreCase(metadata.request.cid, context.requestCid),
+  );
+
+  const attestationRequestMatch = Boolean(
+    metadata.attestation?.requestCid &&
+      context.requestCid &&
+      equalsIgnoreCase(metadata.attestation.requestCid, context.requestCid),
+  );
+
+  const memoHashMatch = Boolean(
+    context.memoHashHex &&
+      context.requestMemoHashHex &&
+      equalsIgnoreCase(context.memoHashHex, context.requestMemoHashHex),
+  );
+
+  return proofCidMatch || requestCidMatch || attestationRequestMatch || memoHashMatch;
+};
+
+export const verifyAttestation = async (
+  context: VerifyAttestationContext,
+  options: VerifyAttestationOptions = {},
+): Promise<VerifyAttestationResult> => {
+  const status = await fetchHeadStatus(context.metadataCid).catch(() => 0);
+  if (status === 0) {
+    return { status: "Recorded", reason: "fetchError" };
+  }
+  if (status >= 400) {
+    return { status: "Recorded", reason: `fetch:${status}` };
   }
 
-  return {
-    status: "Invalid",
-    reason: "Signature verification failed",
-  };
+  try {
+    const metadata = await fetchMetadata(context.metadataCid);
+    const joined = matchesJoinRule(metadata, context);
+    if (joined) {
+      return { status: "Verified", metadata };
+    }
+
+    if (options.strict ?? true) {
+      return { status: "Invalid", metadata, reason: "mismatch" };
+    }
+
+    return { status: "Recorded", metadata, reason: "mismatch" };
+  } catch (error) {
+    return {
+      status: "Recorded",
+      reason: error instanceof Error ? error.message : "metadata-error",
+    };
+  }
 };

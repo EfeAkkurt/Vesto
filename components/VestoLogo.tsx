@@ -1,7 +1,7 @@
 "use client";
 
 import { useAnimationControls, motion } from "framer-motion";
-import { useCallback, useEffect } from "react";
+import { useCallback, useEffect, useRef } from "react";
 
 export type VestoLogoProps = {
   className?: string;
@@ -12,16 +12,23 @@ const ease = [0.33, 1, 0.68, 1] as const;
 
 export function VestoLogo({ className, size = 40 }: VestoLogoProps) {
   const controls = useAnimationControls();
+  const mountedRef = useRef(false);
   const reset = useCallback(() => {
+    if (!mountedRef.current) return;
     void controls.start({ rotate: 0, transition: { duration: 0.001 } });
   }, [controls]);
 
   useEffect(() => {
+    mountedRef.current = true;
     reset();
+    return () => {
+      mountedRef.current = false;
+    };
   }, [reset]);
 
   const spin = useCallback(
     async (rotations: number, duration: number) => {
+      if (!mountedRef.current) return;
       await controls.start({ rotate: 360 * rotations, transition: { duration, ease } });
       reset();
     },

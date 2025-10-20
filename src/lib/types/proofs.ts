@@ -19,7 +19,7 @@ export const PROOF_TYPE_OPTIONS = [
 
 export type ProofType = (typeof PROOF_TYPE_OPTIONS)[number];
 
-export type ProofStatus = "Verified" | "Pending" | "Invalid";
+export type ProofStatus = "Verified" | "Recorded" | "Pending" | "Invalid";
 
 export interface ProofItem {
   id: string;
@@ -66,13 +66,23 @@ export interface Attestation {
   reserveUSD: number;
   ipfs: ProofRef;
   metadataCid: string;
+  proofCid?: string;
   memoHashHex?: string;
   signedBy: string;
   signature: string;
-  signatureType: "ed25519";
+  signatureType: "ed25519" | "manageData";
   nonce: string;
-  status: "Pending" | "Verified" | "Invalid";
+  status: "Pending" | "Recorded" | "Verified" | "Invalid";
   ts: string;
   txHash: string;
   requestCid?: string;
+  signatureCount?: number;
+  metadataFetchFailed?: boolean;
+  metadataFailureReason?: string;
+  feeXlm?: number;
+  sigCount?: number;
+  txSourceAccount?: string;
+  requestMemoHashHex?: string;
 }
+
+export const MANAGE_DATA_SIGNATURE = "MANAGE_DATA";

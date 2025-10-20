@@ -35,6 +35,7 @@ export type TokenizationRequest = {
   to: string;
   amount: string;
   memo: TokenizationMemo;
+  memoHashHex?: string;
   meta?: {
     name?: string;
     type?: string;
@@ -44,6 +45,9 @@ export type TokenizationRequest = {
   };
   metadataStatus: "loaded" | "missing" | "error" | "pending";
   metadataError?: string;
+  feeXlm?: number;
+  sigCount?: number;
+  signedBy?: string | null;
 };
 
 type HorizonPaymentRecord = {
@@ -62,10 +66,18 @@ type HorizonPaymentRecord = {
   transaction?: {
     memo_type?: string | null;
     memo?: string | null;
+    memo_hash?: string | null;
+    fee_charged?: string | number | null;
+    signatures?: string[];
+    source_account?: string | null;
   };
   transaction_attr?: {
     memo_type?: string | null;
     memo?: string | null;
+    memo_hash?: string | null;
+    fee_charged?: string | number | null;
+    signatures?: string[];
+    source_account?: string | null;
   };
 };
 
@@ -186,6 +198,11 @@ const normalisePaymentRecord = (
   const amount = record.amount ?? "0";
   const toAccount = record.to ?? "";
   const fromAccount = record.from ?? record.source_account ?? "";
+  const tx = record.transaction_attr ?? record.transaction ?? undefined;
+  const feeXlm =
+    tx?.fee_charged != null ? Number(tx.fee_charged) / 1e7 : undefined;
+  const sigCount = tx?.signatures?.length ?? undefined;
+  const signedBy = tx?.source_account ?? record.source_account ?? null;
 
   return {
     txHash: record.transaction_hash,
@@ -194,7 +211,11 @@ const normalisePaymentRecord = (
     to: toAccount,
     amount,
     memo,
+    memoHashHex: memo.kind === "hash" ? memo.value : undefined,
     metadataStatus: memo.kind === "cid" ? "pending" : "missing",
+    feeXlm,
+    sigCount,
+    signedBy,
   };
 };
 

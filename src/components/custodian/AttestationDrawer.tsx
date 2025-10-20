@@ -2,16 +2,16 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Buffer } from "buffer";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
-import { decode } from "cborg";
 import { CopyHash } from "@/src/components/ui/CopyHash";
 import type { Attestation } from "@/src/lib/types/proofs";
 import { formatUSD, formatDateTime } from "@/src/lib/utils/format";
 import { getViaGateway } from "@/src/lib/ipfs/client";
-import { AttestationMetadataSchema, type AttestationMetadata } from "@/src/lib/custodian/schema";
+import type { AttestationMetadata } from "@/src/lib/custodian/schema";
 import { TokenRequestMetadataSchema, type TokenRequestMetadata } from "@/src/lib/custodian/requests";
-import { verifyAttestationSignature, type SignatureBundle } from "@/src/lib/attestations/verify";
+import { verifyAttestation } from "@/src/lib/attestations/verify";
+import { debug } from "@/src/lib/logging/logger";
+import { MANAGE_DATA_SIGNATURE } from "@/src/lib/types/proofs";
 
 export type AttestationDrawerProps = {
   open: boolean;
@@ -22,11 +22,12 @@ export type AttestationDrawerProps = {
 
 const statusBadge: Record<Attestation["status"], string> = {
   Verified: "bg-primary/15 text-primary",
+  Recorded: "bg-sky-400/15 text-sky-200",
   Pending: "bg-amber-400/15 text-amber-200",
   Invalid: "bg-rose-400/15 text-rose-300",
 };
 
-type VerificationState = "idle" | "loading" | "verified" | "invalid" | "error";
+type VerificationState = "idle" | "loading" | "recorded" | "verified" | "invalid" | "error";
 
 export const AttestationDrawer = ({ open, onClose, item, onStatusUpdate }: AttestationDrawerProps) => {
   const prefersReducedMotion = useReducedMotion();
@@ -79,129 +80,76 @@ export const AttestationDrawer = ({ open, onClose, item, onStatusUpdate }: Attes
     if (!open || !item) return;
     let cancelled = false;
     (async () => {
-      const initialState = item.status === "Verified" ? "verified" : item.status === "Invalid" ? "invalid" : "loading";
-      setVerification(initialState);
+      const strictVerify = (process.env.NEXT_PUBLIC_STRICT_VERIFY ?? "").trim() === "1";
+      setVerification("loading");
+      setVerificationError(null);
+      setMetadata(null);
+      setRequestMetadata(null);
+
       try {
-        setVerificationError(null);
-        setMetadata(null);
-        setRequestMetadata(null);
-
-        const response = await fetch(getViaGateway(item.metadataCid), {
-          headers: { Accept: "application/octet-stream" },
-        });
-        if (!response.ok) throw new Error(`Gateway responded ${response.status}`);
-        const buffer = await response.arrayBuffer();
-        if (cancelled) return;
-        const bytes = new Uint8Array(buffer);
-        let parsedMetadata: AttestationMetadata | null = null;
-        let parsedRequestMetadata: TokenRequestMetadata | null = null;
-        let decodeError: unknown;
-
-        try {
-          const decoded = decode(bytes);
-          if (decoded && typeof decoded === "object") {
-            const parsed = AttestationMetadataSchema.safeParse(decoded);
-            if (parsed.success) {
-              parsedMetadata = parsed.data;
-            } else {
-              decodeError = new Error("Metadata schema mismatch");
-            }
-          }
-        } catch (error) {
-          decodeError = error;
-        }
-
-        if (!parsedMetadata) {
-          try {
-            const text = new TextDecoder().decode(bytes);
-            const json = JSON.parse(text);
-            const parsed = AttestationMetadataSchema.safeParse(json);
-            if (parsed.success) {
-              parsedMetadata = parsed.data;
-            } else {
-              const parsedToken = TokenRequestMetadataSchema.safeParse(json);
-              if (parsedToken.success) {
-                parsedRequestMetadata = {
-                  ...parsedToken.data,
-                  proofUrl: parsedToken.data.proofUrl ?? getViaGateway(parsedToken.data.proofCid),
-                };
-              } else if (!decodeError) {
-                decodeError = new Error("Metadata schema mismatch");
-              }
-            }
-          } catch (jsonError) {
-            if (!decodeError) decodeError = jsonError;
-          }
-        }
-
-        if (!parsedMetadata && parsedRequestMetadata) {
-          setRequestMetadata(parsedRequestMetadata);
-          setVerification("idle");
-          setVerificationError("Awaiting custodian attestation metadata.");
-          return;
-        }
-
-        if (!parsedMetadata) {
-          throw (decodeError instanceof Error
-            ? decodeError
-            : new Error("Failed to decode attestation metadata"));
-        }
-
-        setMetadata(parsedMetadata);
-
-        const attestationDetails = parsedMetadata.attestation ?? null;
-        const resolvedNonce = (attestationDetails?.nonce ?? item.nonce ?? "").trim();
-        const resolvedSignature = attestationDetails?.signature ?? (item.signature && item.signature !== "-" ? item.signature : "");
-        const resolvedSigner = attestationDetails?.signedBy ?? (item.signedBy || "");
-
-        const signatureBytes =
-          resolvedSignature && resolvedSignature !== "-"
-            ? (() => {
-                try {
-                  return new Uint8Array(Buffer.from(resolvedSignature, "base64"));
-                } catch {
-                  return undefined;
-                }
-              })()
-            : undefined;
-
-        const bundle: SignatureBundle = {
-          signatureString: resolvedSignature || undefined,
-          signatureBytes,
-          publicKey: resolvedSigner || undefined,
-          nonce: resolvedNonce || undefined,
-          messageBase64: typeof attestationDetails?.message === "string" ? attestationDetails.message : undefined,
-          requestCid:
-            attestationDetails?.requestCid ??
-            parsedMetadata.request?.cid ??
-            (typeof item.requestCid === "string" ? item.requestCid : undefined) ??
-            undefined,
+        const context = {
+          metadataCid: item.metadataCid,
+          proofCid: item.proofCid ?? item.ipfs.hash,
+          memoHashHex: item.memoHashHex ?? null,
+          requestCid: item.requestCid,
+          requestMemoHashHex: item.requestMemoHashHex,
         };
+        const outcome = await verifyAttestation(context, { strict: strictVerify });
+        if (cancelled) return;
 
-        const outcome = await verifyAttestationSignature(parsedMetadata, bundle);
+        if (outcome.metadata) {
+          setMetadata(outcome.metadata);
+        }
 
-        if (!cancelled) {
-          if (outcome.status === "Verified") {
-            setVerification("verified");
-            setVerificationError(null);
-            onStatusUpdate?.(item.metadataCid, "Verified");
-          } else if (outcome.status === "Invalid") {
-            setVerification("invalid");
-            setVerificationError(outcome.reason ?? "Signature verification failed");
-            onStatusUpdate?.(item.metadataCid, "Invalid");
-          } else {
-            setVerification("loading");
-            setVerificationError(outcome.reason ?? "Awaiting attestation signature");
+        if (outcome.status === "Verified") {
+          setVerification("verified");
+          setVerificationError(null);
+          onStatusUpdate?.(item.metadataCid, "Verified");
+        } else if (outcome.status === "Invalid") {
+          setVerification("invalid");
+          setVerificationError(outcome.reason ?? "mismatch");
+          onStatusUpdate?.(item.metadataCid, "Invalid");
+        } else {
+          setVerification("recorded");
+          setVerificationError(outcome.reason ?? null);
+          onStatusUpdate?.(item.metadataCid, "Recorded");
+        }
+
+        const requestCid =
+          item.requestCid ??
+          outcome.metadata?.request?.cid ??
+          outcome.metadata?.attestation?.requestCid ??
+          null;
+
+        if (requestCid) {
+          try {
+            const response = await fetch(getViaGateway(requestCid), {
+              headers: { Accept: "application/json, application/cbor" },
+            });
+            if (!response.ok) {
+              throw new Error(`Failed to fetch token request metadata (${response.status})`);
+            }
+            const payload = await response.json();
+            const parsed = TokenRequestMetadataSchema.safeParse(payload);
+            if (parsed.success && !cancelled) {
+              setRequestMetadata({
+                ...parsed.data,
+                proofUrl: parsed.data.proofUrl ?? getViaGateway(parsed.data.proofCid),
+              });
+            }
+          } catch (error) {
+            if (!cancelled) {
+              debug("[attestation:request-metadata:error]", error instanceof Error ? error.message : String(error));
+            }
           }
         }
       } catch (error) {
-        console.error("Failed to verify attestation", error);
-        if (!cancelled) {
-          setVerification("error");
-          setVerificationError(error instanceof Error ? error.message : "Unknown error");
-        }
+        if (cancelled) return;
+        setVerification("error");
+        setVerificationError(error instanceof Error ? error.message : "Unknown error");
       }
     })();
+
     return () => {
       cancelled = true;
     };
@@ -219,7 +167,15 @@ export const AttestationDrawer = ({ open, onClose, item, onStatusUpdate }: Attes
     metadata?.issuer ??
     requestMetadata?.issuer ??
     (content?.signedBy ?? "—");
-  const displaySignature = metadataAttestation?.signature ?? (content?.signature && content.signature !== "-" ? content.signature : "");
+  const displayTxSigner = content?.txSourceAccount ?? displaySignedBy;
+  const displaySigCount = content?.sigCount ?? content?.signatureCount ?? 0;
+  const displayFeeXlm = typeof content?.feeXlm === "number" ? content.feeXlm : undefined;
+  const manageDataSignature =
+    (metadataAttestation?.signature ?? content?.signature ?? "").toUpperCase() === MANAGE_DATA_SIGNATURE;
+  const displaySignature =
+    manageDataSignature || (metadataAttestation?.signature ?? "").length === 0
+      ? ""
+      : metadataAttestation?.signature ?? (content?.signature && content.signature !== "-" ? content.signature : "");
   const proofHash = metadata?.fileCid ?? requestMetadata?.proofCid ?? (content?.ipfs.hash ?? undefined);
   const proofUrl = metadata?.fileCid
     ? getViaGateway(metadata.fileCid)
@@ -280,22 +236,38 @@ export const AttestationDrawer = ({ open, onClose, item, onStatusUpdate }: Attes
                   className={
                     verification === "verified"
                       ? "rounded-full bg-primary/15 px-3 py-1 text-xs font-semibold text-primary"
-                      : verification === "invalid"
-                        ? "rounded-full bg-rose-400/15 px-3 py-1 text-xs font-semibold text-rose-300"
-                        : "rounded-full bg-border/40 px-3 py-1 text-xs font-semibold text-muted-foreground"
+                      : verification === "recorded"
+                        ? "rounded-full bg-sky-400/15 px-3 py-1 text-xs font-semibold text-sky-200"
+                        : verification === "invalid"
+                          ? "rounded-full bg-rose-400/15 px-3 py-1 text-xs font-semibold text-rose-300"
+                          : "rounded-full bg-border/40 px-3 py-1 text-xs font-semibold text-muted-foreground"
                   }
                 >
                   {verification === "loading"
                     ? "Checking"
                     : verification === "verified"
                       ? "Verified"
-                      : verification === "invalid"
-                        ? "Invalid"
-                        : verification === "error"
-                          ? "Error"
-                          : "Pending"}
+                      : verification === "recorded"
+                        ? "Recorded"
+                        : verification === "invalid"
+                          ? "Invalid"
+                          : verification === "error"
+                        ? "Error"
+                        : "Pending"}
                 </span>
               </div>
+              <div className="flex items-center justify-between">
+                <span className="text-muted-foreground">Signed by</span>
+                <span className="font-mono text-xs text-foreground">
+                  {(displayTxSigner && displayTxSigner !== "" ? displayTxSigner : "—")} • {displaySigCount} sig
+                </span>
+              </div>
+              {displayFeeXlm != null ? (
+                <div className="flex items-center justify-between">
+                  <span className="text-muted-foreground">Fee</span>
+                  <span className="font-mono text-xs text-foreground">{displayFeeXlm.toFixed(7)} XLM</span>
+                </div>
+              ) : null}
               <div>
                 <span className="text-muted-foreground">Proof</span>
                 <div className="mt-2 flex items-center gap-2">
@@ -323,6 +295,14 @@ export const AttestationDrawer = ({ open, onClose, item, onStatusUpdate }: Attes
                     Gateway
                   </button>
                 </div>
+                {content.metadataFetchFailed ? (
+                  <p className="mt-1 text-[11px] text-amber-200">
+                    Metadata fetch pending
+                    {content.metadataFailureReason
+                      ? ` · ${content.metadataFailureReason.length > 80 ? `${content.metadataFailureReason.slice(0, 77)}…` : content.metadataFailureReason}`
+                      : ""}
+                  </p>
+                ) : null}
               </div>
               <div>
                 <span className="text-muted-foreground">Tx Hash</span>
@@ -340,7 +320,11 @@ export const AttestationDrawer = ({ open, onClose, item, onStatusUpdate }: Attes
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-muted-foreground">Signature</span>
-                {displaySignature ? (
+                {manageDataSignature ? (
+                  <span className="rounded-full border border-primary/40 bg-primary/10 px-2 py-0.5 text-[11px] font-semibold text-primary">
+                    Manage data
+                  </span>
+                ) : displaySignature ? (
                   <CopyHash value={displaySignature} />
                 ) : (
                   <span className="text-foreground/60">—</span>

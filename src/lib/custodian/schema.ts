@@ -5,6 +5,7 @@ export const AttestationMetadataSchema = z.object({
   week: z.number().int().nonnegative(),
   reserveAmount: z.number().nonnegative(),
   fileCid: z.string().min(1),
+  proofCid: z.string().min(1).optional(),
   issuer: z.string().min(1),
   timestamp: z.string().min(1),
   mime: z.string().optional(),

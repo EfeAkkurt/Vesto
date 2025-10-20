@@ -39,11 +39,12 @@ import { refreshProofsAll } from "@/src/lib/swr/mutateBus";
 const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024;
 const FORM_PROOF_TYPES: ProofType[] = ["Audit Report", "Insurance Policy", "Legal Agreement", "Other"];
 const TYPE_FILTER_OPTIONS = ["All", ...PROOF_TYPE_OPTIONS] as const;
-const STATUS_FILTER_OPTIONS: Array<ProofStatus | "all"> = ["all", "Verified", "Pending", "Invalid"];
+const STATUS_FILTER_OPTIONS: Array<ProofStatus | "all"> = ["all", "Verified", "Recorded", "Pending", "Invalid"];
 const PAGE_SIZE = 10;
 
 const STATUS_PILL_CLASS: Record<ProofStatus, string> = {
   Verified: "bg-emerald-500/10 text-emerald-300",
+  Recorded: "bg-sky-400/15 text-sky-200",
   Pending: "bg-amber-400/15 text-amber-300",
   Invalid: "bg-rose-500/15 text-rose-300",
 };
@@ -109,6 +110,7 @@ const matchesSearch = (proof: ProofListItem, query: string) => {
 
 const statusLabel = (status: ProofStatus) => {
   if (status === "Verified") return "Verified";
+  if (status === "Recorded") return "Recorded";
   if (status === "Invalid") return "Invalid";
   return "Pending";
 };
@@ -640,6 +642,15 @@ const ProofsPage = () => {
                     <span>Unmatched: {diagnostics.unmatched}</span>
                     <span>Last query: {formatDateTime(diagnostics.timestamp)}</span>
                     <span>Horizon: {process.env.NEXT_PUBLIC_HORIZON_URL ?? "—"}</span>
+                  </div>
+                  <div className="mt-2 flex flex-wrap items-center gap-3">
+                    <span>Verified: {diagnostics.verifiedCount}</span>
+                    <span>Recorded: {diagnostics.recordedCount}</span>
+                    <span>Skipped: {diagnostics.skippedCount}</span>
+                    <span>CID fetch errors: {diagnostics.cidFetchErrors}</span>
+                  </div>
+                  <div className="mt-2 font-mono text-[11px] text-foreground/80">
+                    {`{ verifiedCount: ${diagnostics.verifiedCount}, recordedCount: ${diagnostics.recordedCount}, skippedCount: ${diagnostics.skippedCount}, cidFetchErrors: ${diagnostics.cidFetchErrors} }`}
                   </div>
                   <div className="mt-2 flex flex-wrap items-center gap-3">
                     <span>Operations: {attestationOpsDiagnostics.total}</span>

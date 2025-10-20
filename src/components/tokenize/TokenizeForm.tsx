@@ -254,7 +254,7 @@ export const TokenizeForm = forwardRef<TokenizeFormHandle, TokenizeFormProps>(
         toast({ title: "Request sent", description: `${values.assetName} posted to Horizon for custodian review.`, variant: "success" });
         onMintSuccess(result);
         await new Promise((resolve) => {
-          setTimeout(resolve, 1_200);
+          setTimeout(resolve, 2_000);
         });
       } catch (error) {
         console.error("Mint simulation failed", error);

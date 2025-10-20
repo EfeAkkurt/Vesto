@@ -5,18 +5,17 @@ import { Buffer } from "buffer";
 import { useToast } from "@/src/components/ui/Toast";
 import { Loader } from "@/src/components/ui/Loader";
 import type { Attestation } from "@/src/lib/types/proofs";
+import { MANAGE_DATA_SIGNATURE } from "@/src/lib/types/proofs";
 import { uploadFile, putDagCbor, getViaGateway } from "@/src/lib/ipfs/client";
 import { HORIZON, STELLAR_NET } from "@/src/utils/constants";
-import { serializeAttestationMessage, buildAndSubmitMemoTx, type AttestationMsg } from "@/src/lib/custodian/attestation";
+import { submitAttestationTransaction } from "@/src/lib/custodian/attestation";
 import { AttestationMetadataSchema } from "@/src/lib/custodian/schema";
-import { signUserMessage } from "@/lib/wallet/freighter";
 import type { TokenizationRequest } from "@/src/lib/custodian/requests";
 import { refreshDashboardAll, refreshProofsAll } from "@/src/lib/swr/mutateBus";
 
 export type UploadAttestationProps = {
   accountId?: string;
   connected: boolean;
-  preferredDestination?: string;
   nextWeek: number;
   onUploaded: (attestation: Attestation) => void;
   request?: TokenizationRequest | null;
@@ -41,15 +40,17 @@ const generateNonce = () => {
   return Buffer.from(bytes).toString("hex");
 };
 
-export const UploadAttestation = ({ accountId, connected, preferredDestination, nextWeek, onUploaded, request, onRequestCleared }: UploadAttestationProps) => {
+export const UploadAttestation = ({ accountId, connected, nextWeek, onUploaded, request, onRequestCleared }: UploadAttestationProps) => {
   const { toast } = useToast();
   const [reserveUSD, setReserveUSD] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [errors, setErrors] = useState<FormErrors>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [stage, setStage] = useState<SubmissionStage>("idle");
+  const [lastSubmission, setLastSubmission] = useState<{ txHash: string; metadataCid: string } | null>(null);
 
   const requestCid = request?.memo.kind === "cid" ? request.memo.value : undefined;
+  const explorerNetworkSegment = STELLAR_NET?.toLowerCase() === "mainnet" ? "public" : "testnet";
 
   useEffect(() => {
     if (!request) return;
@@ -108,6 +109,7 @@ export const UploadAttestation = ({ accountId, connected, preferredDestination, 
     try {
       const timestamp = new Date().toISOString();
       const nonce = generateNonce();
+      const networkPassphrase = getNetworkPassphrase();
 
       const fileCid = await uploadFile(file);
 
@@ -116,62 +118,15 @@ export const UploadAttestation = ({ accountId, connected, preferredDestination, 
         week: nextWeek,
         reserveAmount: value,
         fileCid,
+        proofCid: request?.meta?.proofCid ?? fileCid,
         issuer: accountId,
         timestamp,
         mime: file.type || "application/octet-stream",
         size: file.size,
-      } satisfies Parameters<typeof AttestationMetadataSchema.parse>[0];
-      AttestationMetadataSchema.parse(metadataBase);
-
-      setStage("signing");
-      const message: AttestationMsg = {
-        week: nextWeek,
-        reserveAmount: value,
-        timestamp,
-        nonce,
-      };
-      const { base64 } = serializeAttestationMessage(message);
-      const signatureResponse = await signUserMessage(base64, accountId);
-      if (process.env.NEXT_PUBLIC_DEBUG === "1") {
-        console.debug("[attestation:signMessage]", {
-          payloadBase64: base64,
-          response: signatureResponse,
-        });
-      }
-      const signedMessage = signatureResponse.signedMessage;
-      if (!signedMessage) {
-        throw new Error("Freighter did not return a signature payload.");
-      }
-      const normalizeSignedPayload = (payload: unknown): Uint8Array => {
-        if (payload instanceof Uint8Array) return payload;
-        if (payload && typeof payload === "object" && Buffer.isBuffer(payload)) {
-          return new Uint8Array(payload);
-        }
-        if (typeof payload === "string") {
-          const trimmed = payload.trim();
-          if (trimmed.length === 0) {
-            throw new Error("Received empty signature payload from Freighter.");
-          }
-          const isHex = /^[0-9a-fA-F]+$/.test(trimmed) && trimmed.length % 2 === 0;
-          const buffer = isHex ? Buffer.from(trimmed, "hex") : Buffer.from(trimmed, "base64");
-          if (buffer.length === 0) {
-            throw new Error("Unable to decode Freighter signature payload.");
-          }
-          return new Uint8Array(buffer);
-        }
-        throw new Error("Unsupported signature payload returned by Freighter.");
-      };
-
-      const signatureBytes = normalizeSignedPayload(signedMessage);
-      const signatureBase64 = Buffer.from(signatureBytes).toString("base64");
-
-      const metadataEnvelope = {
-        ...metadataBase,
         attestation: {
           nonce,
-          signature: signatureBase64,
-          signedBy: signatureResponse.signerAddress ?? accountId,
-          message: base64,
+          signedBy: accountId,
+          signature: MANAGE_DATA_SIGNATURE,
           requestCid,
         },
         request: requestCid
@@ -186,18 +141,26 @@ export const UploadAttestation = ({ accountId, connected, preferredDestination, 
                 : undefined,
             }
           : undefined,
-      };
+      } satisfies Parameters<typeof AttestationMetadataSchema.parse>[0];
+      AttestationMetadataSchema.parse(metadataBase);
 
-      const metadataCid = await putDagCbor(metadataEnvelope);
+      const metadataCid = await putDagCbor(metadataBase);
+
+      setStage("signing");
+      const memoHashHex = request?.memo.kind === "hash" ? request.memo.value : undefined;
+      const { txHash, signatureCount } = await submitAttestationTransaction({
+        account: accountId,
+        metadataCid,
+        memoHashHex,
+        networkPassphrase,
+        serverUrl: HORIZON,
+      });
 
       setStage("submitting");
-      const { txHash } = await buildAndSubmitMemoTx({
-        account: accountId,
-        memoCid: metadataCid,
-        serverUrl: HORIZON,
-        networkPassphrase: getNetworkPassphrase(),
-        destination: preferredDestination,
-      });
+
+      await refreshProofsAll();
+      await refreshDashboardAll();
+      await new Promise((resolve) => setTimeout(resolve, 2000));
 
       const attestation: Attestation = {
         week: nextWeek,
@@ -209,24 +172,28 @@ export const UploadAttestation = ({ accountId, connected, preferredDestination, 
           mime: file.type || "application/octet-stream",
         },
         metadataCid,
-        signedBy: signatureResponse.signerAddress ?? accountId,
-        signature: signatureBase64,
-        signatureType: "ed25519",
+        memoHashHex,
+        signedBy: accountId,
+        signature: MANAGE_DATA_SIGNATURE,
+        signatureType: "manageData",
         nonce,
-        status: "Pending",
+        signatureCount,
+        sigCount: signatureCount,
+        status: "Verified",
         ts: timestamp,
         txHash,
         requestCid,
+        txSourceAccount: accountId,
+        metadataFetchFailed: false,
+        metadataFailureReason: undefined,
       };
-
-      await refreshProofsAll();
-      await refreshDashboardAll();
 
       onUploaded(attestation);
       onRequestCleared?.();
+      setLastSubmission({ txHash, metadataCid });
       toast({
-        title: "Attestation submitted",
-        description: `Week ${nextWeek} signed and broadcasted.`,
+        title: "On-chain attestation ✅",
+        description: `Week ${nextWeek} anchored on Stellar.`,
         variant: "success",
       });
       setReserveUSD("");
@@ -243,6 +210,36 @@ export const UploadAttestation = ({ accountId, connected, preferredDestination, 
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4 rounded-2xl border border-border/60 bg-card/60 p-6">
+      {lastSubmission ? (
+        <div className="rounded-xl border border-primary/40 bg-primary/10 p-3 text-xs text-primary">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="font-semibold">On-chain attestation ✅</p>
+              <p className="mt-1 break-all font-mono text-[11px] text-primary/80">{lastSubmission.txHash}</p>
+            </div>
+            <button
+              type="button"
+              onClick={() =>
+                window.open(
+                  `https://stellar.expert/explorer/${explorerNetworkSegment}/tx/${lastSubmission.txHash}`,
+                  "_blank",
+                  "noopener,noreferrer",
+                )
+              }
+              className="rounded-full border border-primary/40 px-3 py-1 text-xs font-semibold transition hover:border-primary/60 hover:text-primary"
+            >
+              View on StellarExpert
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      {!connected || !accountId ? (
+        <div className="rounded-xl border border-amber-400/40 bg-amber-400/10 p-3 text-xs text-amber-200">
+          Connect wallet to sign attestation.
+        </div>
+      ) : null}
+
       {requestCid ? (
         <div className="rounded-xl border border-primary/40 bg-primary/10 p-3 text-xs text-primary">
           <div className="flex items-start justify-between gap-3">

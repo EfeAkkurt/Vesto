@@ -94,6 +94,9 @@ npm run build
 - Sandbox özellikleri (ör. ağ kısıtı, dev server erişimi) final notunda açıkça yazılmalı.
 - Custodian ve dashboard akışlarında sahte veri bırakmayın; Horizon’dan canlı veri çekilemiyorsa, dökümanlarda tanımlı zarif geri dönüşleri uygulayın.
 - Build/ lint sonuçlarını gizlemeyin; özellikle başarısız build çıkarsa sebebi ve çözümü rapor edin.
+- Custodian attestation yüklemeleri yalnızca tek Freighter modalı ile `signTransaction` üzerinden yapılmalı; `manage_data` + `Memo.hash` yolunu ve `vesto.attestation.cid` adını koruyun.
+- On-chain attestation başarılı olduktan sonra `refreshProofsAll()` ve `refreshDashboardAll()` çağrıları ile SWR mutasyonları tetikleyin ve 1.5 saniyelik ledger gecikmesi bekleyin.
+- Proof doğrulama akışında `manage_data` işlemleri memo hash ile eşleşiyorsa `Verified` statüsüne çekin; IPFS 502/zaman aşımı durumlarını `Recorded` olarak işaretleyin ve diagnostik panellerde `{ verifiedCount, recordedCount, skippedCount, cidFetchErrors }` metriklerini gösterin.
 
 ---
 
