@@ -1,12 +1,12 @@
-import { Buffer } from "buffer";
-import { CID } from "multiformats/cid";
 import { z } from "zod";
 import { getServer } from "@/src/lib/stellar/sdk";
 import { debug, debugObj } from "@/src/lib/logging/logger";
 import { CUSTODIAN_ACCOUNT, HORIZON, IPFS_GATEWAY } from "@/src/utils/constants";
 import { parseAmountToStroops } from "@/src/lib/utils/format";
+import { memoHashB64ToHex } from "@/src/lib/horizon/memos";
+import { CID } from "multiformats/cid";
 
-const TokenRequestMetadataSchema = z.object({
+export const TokenRequestMetadataSchema = z.object({
   schema: z.string().min(1),
   asset: z.object({
     type: z.string().min(1),
@@ -99,34 +99,44 @@ const fetchMetadata = async (cid: string): Promise<TokenRequestMetadata> => {
   return metadataCache.get(cid)!;
 };
 
-const decodeMemoHashHex = (memo?: string | null): string | undefined => {
-  if (!memo) return undefined;
-  try {
-    return Buffer.from(memo, "base64").toString("hex");
-  } catch {
-    return undefined;
-  }
-};
-
 const normaliseCid = (value?: string | null): string | undefined => {
   if (!value) return undefined;
   const trimmed = value.trim();
   if (!trimmed) return undefined;
   try {
-    return CID.parse(trimmed).toV1().toString();
+    const parsed = CID.parse(trimmed);
+    const v1 = parsed.toV1().toString();
+    if (parsed.version === 0 && parsed.toString() !== v1) {
+      debug("[pipeline:custodian] memo CID upgraded to v1", { original: trimmed, upgraded: v1 });
+    }
+    return v1;
   } catch {
     return undefined;
   }
 };
 
-const pickMemo = (record: HorizonPaymentRecord): TokenizationMemo | null => {
+type MemoParseResult =
+  | { memo: TokenizationMemo }
+  | { memo: null; reason: string; context?: Record<string, unknown> };
+
+const parseMemo = (record: HorizonPaymentRecord): MemoParseResult => {
   const transaction = record.transaction_attr ?? record.transaction ?? null;
   const memoType = transaction?.memo_type ?? null;
 
   if (memoType === "text") {
     const rawValue = transaction?.memo ?? record.memo ?? null;
     const cid = normaliseCid(rawValue);
-    return cid ? { kind: "cid", value: cid } : null;
+    if (cid) {
+      return { memo: { kind: "cid", value: cid } };
+    }
+    return {
+      memo: null,
+      reason: "invalid-cid",
+      context: {
+        id: record.id,
+        memo: rawValue,
+      },
+    };
   }
 
   if (memoType === "hash") {
@@ -135,11 +145,38 @@ const pickMemo = (record: HorizonPaymentRecord): TokenizationMemo | null => {
       transaction?.memo ??
       record.memo ??
       null;
-    const memoHashHex = decodeMemoHashHex(hashValue);
-    return memoHashHex ? { kind: "hash", value: memoHashHex } : null;
+    if (!hashValue) {
+      return {
+        memo: null,
+        reason: "missing-memo-hash",
+        context: { id: record.id },
+      };
+    }
+    try {
+      const memoHashHex = memoHashB64ToHex(hashValue);
+      return { memo: { kind: "hash", value: memoHashHex } };
+    } catch {
+      return {
+        memo: null,
+        reason: "invalid-memo-hash",
+        context: { id: record.id },
+      };
+    }
   }
 
-  return null;
+  if (!memoType) {
+    return {
+      memo: null,
+      reason: "missing-memo",
+      context: { id: record.id },
+    };
+  }
+
+  return {
+    memo: null,
+    reason: "unsupported-memo",
+    context: { id: record.id, memo_type: memoType },
+  };
 };
 
 const normalisePaymentRecord = (
@@ -163,7 +200,7 @@ const normalisePaymentRecord = (
 
 const DEFAULT_LIMIT = 100;
 
-type PaymentsQuery = {
+export type PaymentsQuery = {
   forAccount(accountId: string): PaymentsQuery;
   order(direction: "asc" | "desc"): PaymentsQuery;
   limit(limit: number): PaymentsQuery;
@@ -180,9 +217,15 @@ export type CustodianRequestDiagnostics = {
   timestamp: string;
   account: string;
   limit: number;
-  total: number;
-  kept: number;
-  memoTypes: Record<"cid" | "hash", number>;
+  horizonCount: number;
+  acceptedCount: number;
+  memoSummary: Record<"cid" | "hash", number>;
+  dropSummary: {
+    underStroop: number;
+    noMemo: number;
+    invalidCid: number;
+    invalidDag: number;
+  };
   droppedByReason: Record<string, number>;
   samples: CustodianRecordSample[];
 };
@@ -236,9 +279,15 @@ export const fetchCustodianRequests = async (
         timestamp: new Date().toISOString(),
         account: "",
         limit: limit ?? DEFAULT_LIMIT,
-        total: 0,
-        kept: 0,
-        memoTypes: { cid: 0, hash: 0 },
+        horizonCount: 0,
+        acceptedCount: 0,
+        memoSummary: { cid: 0, hash: 0 },
+        dropSummary: {
+          underStroop: 0,
+          noMemo: 0,
+          invalidCid: 0,
+          invalidDag: 0,
+        },
         droppedByReason: {},
         samples: [],
       },
@@ -265,7 +314,7 @@ export const fetchCustodianRequests = async (
 
   const page = await query.call();
 
-  const memoTypes: Record<"cid" | "hash", number> = { cid: 0, hash: 0 };
+  const memoSummary: Record<"cid" | "hash", number> = { cid: 0, hash: 0 };
   const droppedByReason: Record<string, number> = {};
   const normalised: TokenizationRequest[] = [];
   const samples: CustodianRecordSample[] = [];
@@ -313,22 +362,14 @@ export const fetchCustodianRequests = async (
       continue;
     }
 
-    const memo = pickMemo(record);
-    if (!memo) {
-      registerDrop(
-        "invalid-memo",
-        {
-          id: record.id,
-          memo_type: record.transaction_attr?.memo_type ?? record.transaction?.memo_type,
-          memo: record.transaction_attr?.memo ?? record.transaction?.memo ?? record.memo,
-        },
-        droppedByReason,
-      );
+    const memoResult = parseMemo(record);
+    if (!("memo" in memoResult) || memoResult.memo === null) {
+      registerDrop(memoResult.reason, memoResult.context ?? {}, droppedByReason);
       continue;
     }
 
-    memoTypes[memo.kind] += 1;
-    normalised.push(normalisePaymentRecord(record, memo));
+    memoSummary[memoResult.memo.kind] += 1;
+    normalised.push(normalisePaymentRecord(record, memoResult.memo));
   }
 
   const withMetadata = await Promise.all(
@@ -360,6 +401,7 @@ export const fetchCustodianRequests = async (
           cid: entry.memo.value,
           message: error instanceof Error ? error.message : "unknown",
         });
+        registerDrop("metadata-error", { cid: entry.memo.value }, droppedByReason);
         return {
           ...entry,
           metadataStatus: "error" as const,
@@ -373,21 +415,32 @@ export const fetchCustodianRequests = async (
     (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
   );
 
+  const dropSummary = {
+    underStroop: droppedByReason["under-stroop"] ?? 0,
+    noMemo:
+      (droppedByReason["missing-memo"] ?? 0) +
+      (droppedByReason["missing-memo-hash"] ?? 0) +
+      (droppedByReason["unsupported-memo"] ?? 0),
+    invalidCid: droppedByReason["invalid-cid"] ?? 0,
+    invalidDag: droppedByReason["metadata-error"] ?? 0,
+  };
+
   const diagnostics: CustodianRequestDiagnostics = {
     timestamp: new Date().toISOString(),
     account: resolvedAccount,
     limit: safeLimit,
-    total: page.records.length,
-    kept: sorted.length,
-    memoTypes,
+    horizonCount: page.records.length,
+    acceptedCount: sorted.length,
+    memoSummary,
+    dropSummary,
     droppedByReason,
     samples,
   };
 
   debug("[custodian:requests:summary]", {
-    total: diagnostics.total,
-    kept: diagnostics.kept,
-    memoTypes,
+    total: diagnostics.horizonCount,
+    kept: diagnostics.acceptedCount,
+    memoSummary,
     samples: diagnostics.samples.slice(0, 2).map((sample) => ({
       id: sample.id,
       memoType: sample.transaction?.memo_type,

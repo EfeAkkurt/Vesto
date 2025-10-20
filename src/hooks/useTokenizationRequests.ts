@@ -1,12 +1,9 @@
 "use client";
 
 import useSWR from "swr";
-import {
-  fetchCustodianRequests,
-  type CustodianRequestDiagnostics,
-  type CustodianRequestResult,
-} from "@/src/lib/custodian/requests";
+import { fetchCustodianRequests, type CustodianRequestDiagnostics, type CustodianRequestResult } from "@/src/lib/custodian/requests";
 import { CUSTODIAN_ACCOUNT, STELLAR_NET } from "@/src/utils/constants";
+import { debugObj } from "@/src/lib/logging/logger";
 
 const REFRESH_INTERVAL_MS = 12_000;
 const KEY_PREFIX = "custodian-requests" as const;
@@ -18,9 +15,15 @@ const EMPTY_DIAGNOSTICS: CustodianRequestDiagnostics = {
   timestamp: "",
   account: "",
   limit: 0,
-  total: 0,
-  kept: 0,
-  memoTypes: { cid: 0, hash: 0 },
+  horizonCount: 0,
+  acceptedCount: 0,
+  memoSummary: { cid: 0, hash: 0 },
+  dropSummary: {
+    underStroop: 0,
+    noMemo: 0,
+    invalidCid: 0,
+    invalidDag: 0,
+  },
   droppedByReason: {},
   samples: [],
 };
@@ -70,33 +73,18 @@ export const useTokenizationRequests = (accountId?: string) => {
 
   const rescan = async () => {
     const result = await mutate();
-    if (
-      result &&
-      (result.items?.length ?? 0) === 0 &&
-      typeof window !== "undefined" &&
-      process.env.NODE_ENV !== "production"
-    ) {
-      console.groupCollapsed(
-        "[custodian:report]",
-        `account=${maskAccount(result.diagnostics.account)}`,
-      );
-      console.log("diagnostics", {
-        total: result.diagnostics.total,
-        kept: result.diagnostics.kept,
-        memoTypes: result.diagnostics.memoTypes,
-        droppedByReason: result.diagnostics.droppedByReason,
+    if (result && (result.items?.length ?? 0) === 0) {
+      debugObj("[pipeline:custodian] rescan-empty", {
+        account: maskAccount(result.diagnostics.account),
+        totals: {
+          horizon: result.diagnostics.horizonCount,
+          accepted: result.diagnostics.acceptedCount,
+          memo: result.diagnostics.memoSummary,
+          drops: result.diagnostics.dropSummary,
+        },
         lastQuery: result.diagnostics.timestamp,
+        samples: result.diagnostics.samples,
       });
-      result.diagnostics.samples.forEach((sample) => {
-        console.log("sample", {
-          to: maskAccount(sample.to),
-          amount: sample.amount,
-          memoType: sample.transaction?.memo_type,
-          memo: sample.transaction?.memo,
-          transactionHash: sample.transaction_hash,
-        });
-      });
-      console.groupEnd();
     }
     return result;
   };

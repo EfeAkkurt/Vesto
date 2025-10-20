@@ -1,7 +1,7 @@
 import { Buffer } from "buffer";
 import { encode } from "cborg";
 import nacl from "tweetnacl";
-import { loadStellar } from "@/src/lib/stellar/sdk";
+import { loadStellar, getServer as getHorizonServer, STELLAR_NETWORK_PASSPHRASE } from "@/src/lib/stellar/sdk";
 import { AttestationMsgSchema, type AttestationMsgShape } from "@/src/lib/custodian/schema";
 import { signTx } from "@/lib/wallet/freighter";
 
@@ -256,8 +256,7 @@ export const buildAndSubmitMemoTx = async ({
   amount,
 }: SubmitMemoTxArgs): Promise<{ txHash: string }> => {
   const stellar = await loadStellar();
-  const { Server, TransactionBuilder, Operation, Memo, Asset } = stellar as unknown as {
-    Server: new (url: string) => StellarServerLike;
+  const { TransactionBuilder, Operation, Memo, Asset } = stellar as unknown as {
     TransactionBuilder: typeof import("stellar-sdk").TransactionBuilder;
     Operation: typeof import("stellar-sdk").Operation;
     Memo: typeof import("stellar-sdk").Memo;
@@ -268,6 +267,10 @@ export const buildAndSubmitMemoTx = async ({
   if (!horizonUrl) {
     throw new Error("Horizon server URL is required to submit attestation transactions.");
   }
+  const envHorizon = (process.env.NEXT_PUBLIC_HORIZON_URL ?? "").replace(/\/$/, "");
+  if (envHorizon && envHorizon !== horizonUrl) {
+    throw new Error("Horizon server URL mismatch with NEXT_PUBLIC_HORIZON_URL.");
+  }
   const trimmedAccount = account.trim();
   if (!trimmedAccount) {
     throw new Error("Custodian account is required.");
@@ -277,17 +280,27 @@ export const buildAndSubmitMemoTx = async ({
     throw new Error("Attestation metadata CID is required.");
   }
 
-  const server = new Server(horizonUrl);
+  const envPassphrase = STELLAR_NETWORK_PASSPHRASE;
+  if (envPassphrase && envPassphrase !== networkPassphrase) {
+    throw new Error("Provided network passphrase does not match NEXT_PUBLIC_NETWORK_PASSPHRASE.");
+  }
+
+  const server = (await getHorizonServer()) as unknown as StellarServerLike;
   const sourceAccount = await server.loadAccount(trimmedAccount);
   const baseFee = await server.fetchBaseFee();
 
   const encodedMemo = (typeof TextEncoder !== "undefined" ? new TextEncoder() : null)?.encode(memoValue) ?? Buffer.from(memoValue, "utf8");
-  const memo =
-    encodedMemo.length <= 28 ? Memo.text(memoValue) : Memo.hash(await hashCidToHex(memoValue));
+  let memoInstance: ReturnType<typeof Memo.text> | ReturnType<typeof Memo.hash>;
+  if (encodedMemo.length <= 28) {
+    memoInstance = Memo.text(memoValue);
+  } else {
+    const memoHashHex = await hashCidToHex(memoValue);
+    memoInstance = Memo.hash(memoHashHex);
+  }
 
   const target = destination?.trim() || trimmedAccount;
   const tx = new TransactionBuilder(sourceAccount, {
-    fee: baseFee.toString(),
+    fee: (baseFee * 2).toString(),
     networkPassphrase,
   })
     .addOperation(
@@ -297,7 +310,13 @@ export const buildAndSubmitMemoTx = async ({
         amount: amount ?? "0.0000001",
       }),
     )
-    .addMemo(memo)
+    .addOperation(
+      Operation.manageData({
+        name: "vesto.attestation.cid",
+        value: Buffer.from(memoValue, "utf8"),
+      }),
+    )
+    .addMemo(memoInstance)
     .setTimeout(60)
     .build();
 

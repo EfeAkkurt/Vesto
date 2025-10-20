@@ -22,7 +22,7 @@ const focusableSelector =
 
 const INITIAL_HEIGHT = 480;
 const MIN_HEIGHT = 240;
-const MAX_HEIGHT = 720;
+const MAX_HEIGHT = 648;
 
 export const StellarExpertWidgetDialog = ({ txHash, network = "TESTNET", open, onClose }: StellarExpertWidgetDialogProps) => {
   const prefersReducedMotion = useReducedMotion();

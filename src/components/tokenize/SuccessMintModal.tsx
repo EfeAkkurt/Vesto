@@ -97,7 +97,7 @@ export const SuccessMintModal = forwardRef<SuccessMintModalHandle, SuccessMintMo
         <AnimatePresence initial={false}>
           {open && content ? (
             <motion.div
-              key={txHash ?? "success-modal"}
+              key="tokenize-success-modal"
               className="fixed inset-0 z-[95] flex items-center justify-center bg-black/60 backdrop-blur"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -108,6 +108,7 @@ export const SuccessMintModal = forwardRef<SuccessMintModalHandle, SuccessMintMo
               }}
             >
               <motion.div
+                key="tokenize-success-modal-panel"
                 ref={containerRef}
                 role="dialog"
                 aria-modal="true"
@@ -210,7 +211,7 @@ export const SuccessMintModal = forwardRef<SuccessMintModalHandle, SuccessMintMo
                       onClick={() => setWidgetOpen(true)}
                       className="inline-flex items-center justify-center rounded-lg border border-border/60 px-4 py-2 text-sm font-semibold text-foreground transition hover:border-primary/50 hover:text-primary"
                     >
-                      View Live Details
+                      View Live on Stellar Expert
                     </button>
                   ) : null}
                   <Link

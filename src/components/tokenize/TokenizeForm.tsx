@@ -10,6 +10,7 @@ import {
   type ChangeEvent,
   type FormEvent,
 } from "react";
+import { mutate } from "swr";
 import { motion, useReducedMotion } from "framer-motion";
 import { useToast } from "@/src/components/ui/Toast";
 import { Loader } from "@/src/components/ui/Loader";
@@ -19,6 +20,7 @@ import { uploadFile, putDagCbor, getViaGateway } from "@/src/lib/ipfs/client";
 import type { AssetType, MintResult, ProofRef } from "@/src/lib/types/proofs";
 import { buildAndSubmitMemoTx } from "@/src/lib/custodian/attestation";
 import { CUSTODIAN_ACCOUNT, HORIZON, STELLAR_NET } from "@/src/utils/constants";
+import { refreshProofsAll } from "@/src/lib/swr/mutateBus";
 
 export type TokenizeFormValues = {
   assetType: AssetType | "";
@@ -237,6 +239,9 @@ export const TokenizeForm = forwardRef<TokenizeFormHandle, TokenizeFormProps>(
           amount: "0.0000001",
         });
 
+        await refreshProofsAll();
+        await mutate("dashboard:attestations");
+
         const result: MintResult = {
           tokenId: randomTokenId(),
           supply: numericValue,
@@ -248,6 +253,9 @@ export const TokenizeForm = forwardRef<TokenizeFormHandle, TokenizeFormProps>(
         };
         toast({ title: "Request sent", description: `${values.assetName} posted to Horizon for custodian review.`, variant: "success" });
         onMintSuccess(result);
+        await new Promise((resolve) => {
+          setTimeout(resolve, 1_200);
+        });
       } catch (error) {
         console.error("Mint simulation failed", error);
         toast({ title: "Mint failed", description: "Unexpected error, try again shortly.", variant: "error" });

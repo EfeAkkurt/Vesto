@@ -11,19 +11,25 @@ import { TransactionsTable } from "@/src/components/tables/TransactionsTable";
 import { UpcomingPayoutCard } from "@/src/components/cards/UpcomingPayoutCard";
 import { NetworkStatusCard } from "@/src/components/cards/NetworkStatusCard";
 import { useWallet } from "@/src/hooks/useWallet";
-import { useAccount, useAccountEffects, useAccountPayments } from "@/src/hooks/horizon";
-import { useAttestations } from "@/src/hooks/useAttestations";
+import { useAccount, useAccountPayments } from "@/src/hooks/horizon";
 import { useNetworkHealth } from "@/src/hooks/useNetworkHealth";
-import { useAssetSupply } from "@/src/hooks/useAssetSupply";
 import {
   buildMetrics,
   buildPayoutSchedule,
-  buildReservePoints,
   deriveHoldings,
-  deriveKpi,
 } from "@/src/lib/dashboard/transformers";
+import type { DashboardKpi } from "@/src/lib/dashboard/types";
+import { useDashboardAttestations, useDashboardKpis, useDashboardReserves } from "@/src/hooks/useDashboardData";
 import { stagger } from "@/src/components/motion/presets";
-import { CUSTODIAN_ACCOUNT, TOKEN_ASSET_CODE, TOKEN_ASSET_ISSUER } from "@/src/utils/constants";
+import { CUSTODIAN_ACCOUNT } from "@/src/utils/constants";
+
+const DEFAULT_KPI: DashboardKpi = {
+  portfolioUSD: 0,
+  minted: 0,
+  coverage: 0,
+  holders: 0,
+  updatedAt: "",
+};
 
 const DashboardPage = () => {
   const wallet = useWallet();
@@ -43,31 +49,31 @@ const DashboardPage = () => {
   } = useAccountPayments(overviewAccountId);
 
   const {
-    data: effects,
-    isLoading: effectsLoading,
-  } = useAccountEffects(overviewAccountId);
+    data: dashboardKpi,
+    isLoading: kpiLoading,
+  } = useDashboardKpis();
 
-  const attestationState = useAttestations(overviewAccountId, payments, effects);
+  const {
+    data: dashboardAttestations = [],
+    isLoading: dashboardAttestationsLoading,
+  } = useDashboardAttestations();
 
-  const assetSupply = useAssetSupply(TOKEN_ASSET_CODE, TOKEN_ASSET_ISSUER);
-  const mintedSupply = assetSupply.data;
+  const {
+    data: reservePointsData = [],
+    isLoading: reserveLoading,
+  } = useDashboardReserves();
 
   const holdingsData = useMemo(
     () => (account ? deriveHoldings(account) : []),
     [account],
   );
 
-  const kpi = useMemo(() => deriveKpi(account, mintedSupply), [account, mintedSupply]);
+  const kpi = dashboardKpi ?? DEFAULT_KPI;
   const metrics = useMemo(() => buildMetrics(kpi), [kpi]);
 
-  const reservePointsData = useMemo(
-    () => buildReservePoints(attestationState.data),
-    [attestationState.data],
-  );
-
   const payoutScheduleData = useMemo(
-    () => buildPayoutSchedule(attestationState.data),
-    [attestationState.data],
+    () => buildPayoutSchedule(dashboardAttestations),
+    [dashboardAttestations],
   );
 
   const effectiveWallet = useMemo(
@@ -78,9 +84,9 @@ const DashboardPage = () => {
     [wallet, account, kpi.portfolioUSD],
   );
 
-  const isAccountLoading = accountLoading;
+  const isAccountLoading = accountLoading || kpiLoading;
   const isPaymentsLoading = paymentsLoading;
-  const isAttestationLoading = attestationState.isLoading || effectsLoading || paymentsLoading;
+  const isAttestationLoading = dashboardAttestationsLoading || reserveLoading || paymentsLoading;
 
   return (
     <LayoutShell wallet={effectiveWallet} networkHealth={networkHealth}>
@@ -111,7 +117,7 @@ const DashboardPage = () => {
             <PortfolioBars data={holdingsData} isLoading={isAccountLoading} />
           </div>
           <div className="xl:col-span-6">
-            <DonutAttestations attestations={attestationState.data} isLoading={isAttestationLoading} />
+            <DonutAttestations attestations={dashboardAttestations} isLoading={isAttestationLoading} />
           </div>
           <div className="xl:col-span-8">
             <ReserveProjection data={reservePointsData} isLoading={isAttestationLoading} />

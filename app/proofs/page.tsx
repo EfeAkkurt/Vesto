@@ -17,7 +17,7 @@ import { useToast } from "@/src/components/ui/Toast";
 import { Loader } from "@/src/components/ui/Loader";
 import { CopyHash } from "@/src/components/ui/CopyHash";
 import { useStoredProofs } from "@/src/hooks/useStoredProofs";
-import { useAccountPayments, useAccountEffects } from "@/src/hooks/horizon";
+import { useAccountOperations, useAccountEffects } from "@/src/hooks/horizon";
 import { useAttestations } from "@/src/hooks/useAttestations";
 import {
   buildProofList,
@@ -34,6 +34,7 @@ import { formatBytes, formatDateTime } from "@/src/lib/utils/format";
 import { PROOF_TYPE_OPTIONS, type ProofType, type ProofStatus } from "@/src/lib/types/proofs";
 import type { StoredProof } from "@/src/lib/proofs/storage";
 import { CUSTODIAN_ACCOUNT } from "@/src/utils/constants";
+import { refreshProofsAll } from "@/src/lib/swr/mutateBus";
 
 const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024;
 const FORM_PROOF_TYPES: ProofType[] = ["Audit Report", "Insurance Policy", "Legal Agreement", "Other"];
@@ -151,9 +152,9 @@ const ProofsPage = () => {
   const custodianAccount = wallet.accountId ?? (CUSTODIAN_ACCOUNT || undefined);
 
   const storedProofs = useStoredProofs();
-  const paymentsResponse = useAccountPayments(custodianAccount, 120);
+  const operationsResponse = useAccountOperations(custodianAccount, 200);
   const effectsResponse = useAccountEffects(custodianAccount, 120);
-  const attestationState = useAttestations(custodianAccount, paymentsResponse.data, effectsResponse.data);
+  const attestationState = useAttestations(custodianAccount, operationsResponse.data, effectsResponse.data);
 
   const proofList = useMemo<ProofListItem[]>(
     () => buildProofList(storedProofs.proofs, attestationState.data ?? []),
@@ -197,6 +198,31 @@ const ProofsPage = () => {
   const initialLoading = storedProofs.isLoading && proofList.length === 0;
   const attestationsLoading = attestationState.isLoading;
   const showSkeleton = initialLoading || attestationsLoading;
+
+  const attestationOpsDiagnostics = useMemo(() => {
+    const operations = operationsResponse.data ?? [];
+    const memoSummary = { text: 0, hash: 0, none: 0 };
+    operations.forEach((operation) => {
+      const memoType =
+        operation.transaction_attr?.memo_type ??
+        ((operation as unknown as { transaction?: { memo_type?: string | null } }).transaction?.memo_type ?? null);
+      if (memoType === "text") {
+        memoSummary.text += 1;
+      } else if (memoType === "hash") {
+        memoSummary.hash += 1;
+      } else {
+        memoSummary.none += 1;
+      }
+    });
+    return {
+      total: operations.length,
+      payments: operations.filter((operation) => operation.type === "payment").length,
+      manageData: operations.filter((operation) => operation.type === "manage_data").length,
+      memoSummary,
+    };
+  }, [operationsResponse.data]);
+
+  const attestationMemoSummary = `${attestationOpsDiagnostics.memoSummary.text} TEXT / ${attestationOpsDiagnostics.memoSummary.hash} HASH / ${attestationOpsDiagnostics.memoSummary.none} NONE`;
 
   const filteredProofs = useMemo(() => {
     const start = startDate ? applyDateFloor(startDate) : undefined;
@@ -359,6 +385,8 @@ const ProofsPage = () => {
       };
 
       await storedProofs.addProof(entry);
+      await refreshProofsAll();
+      await mutate("dashboard:attestations");
       toast({
         title: "Proof uploaded",
         description: `${selectedFile.name} stored on IPFS.`,
@@ -380,7 +408,7 @@ const ProofsPage = () => {
   const handleRescan = async () => {
     await Promise.all([
       storedProofs.mutate(),
-      paymentsResponse.mutate?.(),
+      operationsResponse.mutate?.(),
       effectsResponse.mutate?.(),
     ]);
   };
@@ -613,6 +641,12 @@ const ProofsPage = () => {
                     <span>Last query: {formatDateTime(diagnostics.timestamp)}</span>
                     <span>Horizon: {process.env.NEXT_PUBLIC_HORIZON_URL ?? "—"}</span>
                   </div>
+                  <div className="mt-2 flex flex-wrap items-center gap-3">
+                    <span>Operations: {attestationOpsDiagnostics.total}</span>
+                    <span>Payments: {attestationOpsDiagnostics.payments}</span>
+                    <span>Manage data: {attestationOpsDiagnostics.manageData}</span>
+                    <span>Memo (text/hash/none): {attestationMemoSummary}</span>
+                  </div>
                   <div className="mt-3">
                     <p className="font-medium text-foreground/80">Dropped reasons</p>
                     <ul className="mt-1 space-y-1">
@@ -639,7 +673,7 @@ const ProofsPage = () => {
                       </button>
                       {peekOpen ? (
                         <pre className="mt-2 max-h-64 overflow-auto rounded-lg border border-border/40 bg-background/60 p-3 text-[11px] text-foreground/80">
-                          {JSON.stringify((attestationState.data ?? []).slice(0, 3), null, 2)}
+                          {JSON.stringify((operationsResponse.data ?? []).slice(0, 5), null, 2)}
                         </pre>
                       ) : null}
                     </div>

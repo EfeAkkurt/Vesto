@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import type { HorizonEffect, HorizonPayment } from "@/src/hooks/horizon";
+import type { HorizonEffect, HorizonOperation } from "@/src/hooks/horizon";
 import { resolveAttestations } from "@/src/lib/attestations/store";
 import type { Attestation } from "@/src/lib/types/proofs";
 
@@ -11,20 +11,20 @@ export type UseAttestationsState = {
   error?: Error;
 };
 
-const buildSignatureKey = (payments?: HorizonPayment[], effects?: HorizonEffect[]): string => {
-  const paymentKey = payments?.map((payment) => `${payment.id}:${payment.transaction_hash}`).join("|") ?? "";
+const buildSignatureKey = (operations?: HorizonOperation[], effects?: HorizonEffect[]): string => {
+  const operationKey = operations?.map((operation) => `${operation.id}:${operation.transaction_hash}`).join("|") ?? "";
   const effectKey =
     effects?.map((effect) => `${effect.id ?? effect.paging_token ?? effect.type}:${effect.transaction_hash ?? ""}`).join("|") ?? "";
-  return `${paymentKey}::${effectKey}`;
+  return `${operationKey}::${effectKey}`;
 };
 
 export const useAttestations = (
   accountId?: string,
-  payments?: HorizonPayment[],
+  operations?: HorizonOperation[],
   effects?: HorizonEffect[],
 ): UseAttestationsState => {
   const [state, setState] = useState<UseAttestationsState>({ data: [], isLoading: false });
-  const signatureKey = useMemo(() => buildSignatureKey(payments, effects), [payments, effects]);
+  const signatureKey = useMemo(() => buildSignatureKey(operations, effects), [operations, effects]);
 
   useEffect(() => {
     if (!accountId) {
@@ -32,7 +32,7 @@ export const useAttestations = (
       return;
     }
 
-    if (!payments?.length) {
+    if (!operations?.length) {
       setState({ data: [], isLoading: false });
       return;
     }
@@ -44,7 +44,7 @@ export const useAttestations = (
       error: undefined,
     }));
 
-    resolveAttestations(payments, effects ?? [])
+    resolveAttestations(operations, effects ?? [])
       .then((attestations) => {
         if (cancelled) return;
         setState({ data: attestations, isLoading: false });
@@ -58,7 +58,7 @@ export const useAttestations = (
     return () => {
       cancelled = true;
     };
-  }, [accountId, payments, effects, signatureKey]);
+  }, [accountId, operations, effects, signatureKey]);
 
   return state;
 };

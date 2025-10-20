@@ -11,6 +11,7 @@ import { serializeAttestationMessage, buildAndSubmitMemoTx, type AttestationMsg 
 import { AttestationMetadataSchema } from "@/src/lib/custodian/schema";
 import { signUserMessage } from "@/lib/wallet/freighter";
 import type { TokenizationRequest } from "@/src/lib/custodian/requests";
+import { refreshDashboardAll, refreshProofsAll } from "@/src/lib/swr/mutateBus";
 
 export type UploadAttestationProps = {
   accountId?: string;
@@ -131,16 +132,37 @@ export const UploadAttestation = ({ accountId, connected, preferredDestination, 
       };
       const { base64 } = serializeAttestationMessage(message);
       const signatureResponse = await signUserMessage(base64, accountId);
+      if (process.env.NEXT_PUBLIC_DEBUG === "1") {
+        console.debug("[attestation:signMessage]", {
+          payloadBase64: base64,
+          response: signatureResponse,
+        });
+      }
       const signedMessage = signatureResponse.signedMessage;
       if (!signedMessage) {
         throw new Error("Freighter did not return a signature payload.");
       }
-      const signatureBytes =
-        typeof signedMessage === "string"
-          ? Buffer.from(signedMessage, "base64")
-          : Buffer.isBuffer(signedMessage)
-            ? signedMessage
-            : Buffer.from(signedMessage);
+      const normalizeSignedPayload = (payload: unknown): Uint8Array => {
+        if (payload instanceof Uint8Array) return payload;
+        if (payload && typeof payload === "object" && Buffer.isBuffer(payload)) {
+          return new Uint8Array(payload);
+        }
+        if (typeof payload === "string") {
+          const trimmed = payload.trim();
+          if (trimmed.length === 0) {
+            throw new Error("Received empty signature payload from Freighter.");
+          }
+          const isHex = /^[0-9a-fA-F]+$/.test(trimmed) && trimmed.length % 2 === 0;
+          const buffer = isHex ? Buffer.from(trimmed, "hex") : Buffer.from(trimmed, "base64");
+          if (buffer.length === 0) {
+            throw new Error("Unable to decode Freighter signature payload.");
+          }
+          return new Uint8Array(buffer);
+        }
+        throw new Error("Unsupported signature payload returned by Freighter.");
+      };
+
+      const signatureBytes = normalizeSignedPayload(signedMessage);
       const signatureBase64 = Buffer.from(signatureBytes).toString("base64");
 
       const metadataEnvelope = {
@@ -196,6 +218,9 @@ export const UploadAttestation = ({ accountId, connected, preferredDestination, 
         txHash,
         requestCid,
       };
+
+      await refreshProofsAll();
+      await refreshDashboardAll();
 
       onUploaded(attestation);
       onRequestCleared?.();

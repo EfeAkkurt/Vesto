@@ -14,7 +14,7 @@ import { AttestationDrawer } from "@/src/components/custodian/AttestationDrawer"
 import { SubmissionModal } from "@/src/components/custodian/SubmissionModal";
 import type { Attestation } from "@/src/lib/types/proofs";
 import { formatUSD, formatDateTime, formatXlm } from "@/src/lib/utils/format";
-import { useAccountPayments, useAccountEffects } from "@/src/hooks/horizon";
+import { useAccountOperations, useAccountEffects } from "@/src/hooks/horizon";
 import { useAttestations } from "@/src/hooks/useAttestations";
 import { useTokenizationRequests } from "@/src/hooks/useTokenizationRequests";
 import type { TokenizationRequest } from "@/src/lib/custodian/requests";
@@ -70,9 +70,9 @@ const CustodianPage = () => {
 
   const custodianAccount = wallet.accountId ?? CUSTODIAN_ACCOUNT;
 
-  const paymentsResponse = useAccountPayments(custodianAccount, 60);
+  const operationsResponse = useAccountOperations(custodianAccount, 120);
   const effectsResponse = useAccountEffects(custodianAccount, 60);
-  const attestationState = useAttestations(custodianAccount, paymentsResponse.data, effectsResponse.data);
+  const attestationState = useAttestations(custodianAccount, operationsResponse.data, effectsResponse.data);
   const attestations = useMemo(() => attestationState.data ?? [], [attestationState.data]);
 
   const {
@@ -95,19 +95,26 @@ const CustodianPage = () => {
       ? "https://stellar.expert/explorer/public/tx/"
       : "https://stellar.expert/explorer/testnet/tx/";
 
-  const attestationByRequestCid = useMemo(() => {
-    const map = new Map<string, Attestation>();
+  const attestationMaps = useMemo(() => {
+    const byRequest = new Map<string, Attestation>();
+    const byMemoHash = new Map<string, Attestation>();
     attestations.forEach((att) => {
       if (att.requestCid) {
-        map.set(att.requestCid, att);
+        byRequest.set(att.requestCid, att);
+      }
+      if (att.memoHashHex) {
+        byMemoHash.set(att.memoHashHex.toLowerCase(), att);
       }
     });
-    return map;
+    return { byRequest, byMemoHash };
   }, [attestations]);
 
   const enrichedRequests = useMemo<EnrichedRequest[]>(() => {
     return rawRequests.map((request) => {
-      const att = request.memo.kind === "cid" ? attestationByRequestCid.get(request.memo.value) : undefined;
+      const att =
+        request.memo.kind === "cid"
+          ? attestationMaps.byRequest.get(request.memo.value)
+          : attestationMaps.byMemoHash.get(request.memo.value.toLowerCase());
       let status: RequestStatus = "pending";
       if (att) {
         status = att.status === "Verified" ? "approved" : att.status === "Invalid" ? "rejected" : "pending";
@@ -118,13 +125,7 @@ const CustodianPage = () => {
         attestation: att,
       } satisfies EnrichedRequest;
     });
-  }, [attestationByRequestCid, rawRequests]);
-
-  useEffect(() => {
-    if (process.env.NODE_ENV !== "production") {
-      console.debug("[custodian:ui] items", enrichedRequests.length);
-    }
-  }, [enrichedRequests.length]);
+  }, [attestationMaps, rawRequests]);
 
   const filteredRequests = useMemo(() => {
     const query = searchTerm.trim().toLowerCase();
@@ -173,11 +174,25 @@ const CustodianPage = () => {
     setSelectedAttestation(null);
   };
 
+  const handleAttestationStatusUpdate = (metadataCid: string, status: Attestation["status"]) => {
+    setSelectedAttestation((current) =>
+      current && current.metadataCid === metadataCid ? { ...current, status } : current,
+    );
+    const tasks = [
+      operationsResponse.mutate?.(),
+      effectsResponse.mutate?.(),
+      rescan(),
+    ].filter(Boolean) as Promise<unknown>[];
+    if (tasks.length) {
+      void Promise.allSettled(tasks);
+    }
+  };
+
   const handleSubmission = async (attestation: Attestation) => {
     setSubmission(attestation);
     setSelectedRequest(null);
     const refreshers = [
-      paymentsResponse.mutate?.(),
+      operationsResponse.mutate?.(),
       effectsResponse.mutate?.(),
       rescan(),
     ].filter(Boolean) as Promise<unknown>[];
@@ -200,10 +215,35 @@ const CustodianPage = () => {
         .slice(0, 5),
     [diagnostics.droppedByReason],
   );
-  const memoTypeSummary = `${diagnostics.memoTypes.cid} CID / ${diagnostics.memoTypes.hash} HASH`;
+  const memoTypeSummary = `${diagnostics.memoSummary.cid} CID / ${diagnostics.memoSummary.hash} HASH`;
   const lastQueryDisplay = diagnostics.timestamp
     ? new Date(diagnostics.timestamp).toLocaleString()
     : "—";
+
+  const attestationOpsDiagnostics = useMemo(() => {
+    const operations = operationsResponse.data ?? [];
+    const memoSummary = { text: 0, hash: 0, none: 0 };
+    operations.forEach((operation) => {
+      const memoType =
+        operation.transaction_attr?.memo_type ??
+        ((operation as unknown as { transaction?: { memo_type?: string | null } }).transaction?.memo_type ?? null);
+      if (memoType === "text") {
+        memoSummary.text += 1;
+      } else if (memoType === "hash") {
+        memoSummary.hash += 1;
+      } else {
+        memoSummary.none += 1;
+      }
+    });
+    return {
+      total: operations.length,
+      payments: operations.filter((operation) => operation.type === "payment").length,
+      manageData: operations.filter((operation) => operation.type === "manage_data").length,
+      memoSummary,
+    };
+  }, [operationsResponse.data]);
+
+  const attestationMemoSummary = `${attestationOpsDiagnostics.memoSummary.text} TEXT / ${attestationOpsDiagnostics.memoSummary.hash} HASH / ${attestationOpsDiagnostics.memoSummary.none} NONE`;
   const maskedCustodian = maskAccountId(diagnostics.account);
   const debugSamples = diagnostics.samples.slice(0, 5);
   const requestsErrorMessage = requestsError
@@ -327,9 +367,21 @@ const CustodianPage = () => {
                   <span>Last Query: {lastQueryDisplay}</span>
                 </div>
                 <div className="flex flex-wrap items-center gap-3 text-[11px]">
-                  <span>Total payments: {diagnostics.total}</span>
-                  <span>Accepted: {diagnostics.kept}</span>
+                  <span>Total payments: {diagnostics.horizonCount}</span>
+                  <span>Accepted: {diagnostics.acceptedCount}</span>
                   <span>Memo types: {memoTypeSummary}</span>
+                </div>
+                <div className="flex flex-wrap items-center gap-3 text-[11px]">
+                  <span>Attestation ops: {attestationOpsDiagnostics.total}</span>
+                  <span>Payments: {attestationOpsDiagnostics.payments}</span>
+                  <span>Manage data: {attestationOpsDiagnostics.manageData}</span>
+                  <span>Memo (text/hash/none): {attestationMemoSummary}</span>
+                </div>
+                <div className="flex flex-wrap items-center gap-3 text-[11px] text-foreground/70">
+                  <span>• Under-stroop: {diagnostics.dropSummary.underStroop}</span>
+                  <span>• No memo: {diagnostics.dropSummary.noMemo}</span>
+                  <span>• Invalid CID: {diagnostics.dropSummary.invalidCid}</span>
+                  <span>• Invalid DAG: {diagnostics.dropSummary.invalidDag}</span>
                 </div>
                 <div>
                   <p className="font-medium text-foreground/80">Dropped reasons</p>
@@ -585,7 +637,12 @@ const CustodianPage = () => {
       </motion.div>
 
       <SubmissionModal open={submission !== null} attestation={submission} onClose={() => setSubmission(null)} />
-      <AttestationDrawer open={drawerOpen} onClose={handleAttestationClose} item={selectedAttestation} />
+      <AttestationDrawer
+        open={drawerOpen}
+        onClose={handleAttestationClose}
+        item={selectedAttestation}
+        onStatusUpdate={handleAttestationStatusUpdate}
+      />
       {expertTxHash ? (
         <StellarExpertWidgetDialog
           txHash={expertTxHash}

@@ -9,9 +9,9 @@ import { CopyHash } from "@/src/components/ui/CopyHash";
 import type { Attestation } from "@/src/lib/types/proofs";
 import { formatUSD, formatDateTime } from "@/src/lib/utils/format";
 import { getViaGateway } from "@/src/lib/ipfs/client";
-import { canonicalizeToCbor, verifyEd25519, type AttestationMsg } from "@/src/lib/custodian/attestation";
 import { AttestationMetadataSchema, type AttestationMetadata } from "@/src/lib/custodian/schema";
-import { rawPublicKeyFromAddress } from "@/src/lib/stellar/keys";
+import { TokenRequestMetadataSchema, type TokenRequestMetadata } from "@/src/lib/custodian/requests";
+import { verifyAttestationSignature, type SignatureBundle } from "@/src/lib/attestations/verify";
 
 export type AttestationDrawerProps = {
   open: boolean;
@@ -33,6 +33,7 @@ export const AttestationDrawer = ({ open, onClose, item, onStatusUpdate }: Attes
   const [mounted, setMounted] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
   const [metadata, setMetadata] = useState<AttestationMetadata | null>(null);
+  const [requestMetadata, setRequestMetadata] = useState<TokenRequestMetadata | null>(null);
   const [verification, setVerification] = useState<VerificationState>("idle");
   const [verificationError, setVerificationError] = useState<string | null>(null);
 
@@ -83,6 +84,7 @@ export const AttestationDrawer = ({ open, onClose, item, onStatusUpdate }: Attes
       try {
         setVerificationError(null);
         setMetadata(null);
+        setRequestMetadata(null);
 
         const response = await fetch(getViaGateway(item.metadataCid), {
           headers: { Accept: "application/octet-stream" },
@@ -90,29 +92,107 @@ export const AttestationDrawer = ({ open, onClose, item, onStatusUpdate }: Attes
         if (!response.ok) throw new Error(`Gateway responded ${response.status}`);
         const buffer = await response.arrayBuffer();
         if (cancelled) return;
-        const decoded = decode(new Uint8Array(buffer));
-        if (decoded && typeof decoded === "object") {
-          const parsed = AttestationMetadataSchema.safeParse(decoded);
-          if (!parsed.success) {
-            throw new Error("Metadata schema mismatch");
+        const bytes = new Uint8Array(buffer);
+        let parsedMetadata: AttestationMetadata | null = null;
+        let parsedRequestMetadata: TokenRequestMetadata | null = null;
+        let decodeError: unknown;
+
+        try {
+          const decoded = decode(bytes);
+          if (decoded && typeof decoded === "object") {
+            const parsed = AttestationMetadataSchema.safeParse(decoded);
+            if (parsed.success) {
+              parsedMetadata = parsed.data;
+            } else {
+              decodeError = new Error("Metadata schema mismatch");
+            }
           }
-          setMetadata(parsed.data);
+        } catch (error) {
+          decodeError = error;
         }
 
-        const message: AttestationMsg = {
-          week: item.week,
-          reserveAmount: item.reserveUSD,
-          timestamp: item.ts,
-          nonce: item.nonce,
+        if (!parsedMetadata) {
+          try {
+            const text = new TextDecoder().decode(bytes);
+            const json = JSON.parse(text);
+            const parsed = AttestationMetadataSchema.safeParse(json);
+            if (parsed.success) {
+              parsedMetadata = parsed.data;
+            } else {
+              const parsedToken = TokenRequestMetadataSchema.safeParse(json);
+              if (parsedToken.success) {
+                parsedRequestMetadata = {
+                  ...parsedToken.data,
+                  proofUrl: parsedToken.data.proofUrl ?? getViaGateway(parsedToken.data.proofCid),
+                };
+              } else if (!decodeError) {
+                decodeError = new Error("Metadata schema mismatch");
+              }
+            }
+          } catch (jsonError) {
+            if (!decodeError) decodeError = jsonError;
+          }
+        }
+
+        if (!parsedMetadata && parsedRequestMetadata) {
+          setRequestMetadata(parsedRequestMetadata);
+          setVerification("idle");
+          setVerificationError("Awaiting custodian attestation metadata.");
+          return;
+        }
+
+        if (!parsedMetadata) {
+          throw (decodeError instanceof Error
+            ? decodeError
+            : new Error("Failed to decode attestation metadata"));
+        }
+
+        setMetadata(parsedMetadata);
+
+        const attestationDetails = parsedMetadata.attestation ?? null;
+        const resolvedNonce = (attestationDetails?.nonce ?? item.nonce ?? "").trim();
+        const resolvedSignature = attestationDetails?.signature ?? (item.signature && item.signature !== "-" ? item.signature : "");
+        const resolvedSigner = attestationDetails?.signedBy ?? (item.signedBy || "");
+
+        const signatureBytes =
+          resolvedSignature && resolvedSignature !== "-"
+            ? (() => {
+                try {
+                  return new Uint8Array(Buffer.from(resolvedSignature, "base64"));
+                } catch {
+                  return undefined;
+                }
+              })()
+            : undefined;
+
+        const bundle: SignatureBundle = {
+          signatureString: resolvedSignature || undefined,
+          signatureBytes,
+          publicKey: resolvedSigner || undefined,
+          nonce: resolvedNonce || undefined,
+          messageBase64: typeof attestationDetails?.message === "string" ? attestationDetails.message : undefined,
+          requestCid:
+            attestationDetails?.requestCid ??
+            parsedMetadata.request?.cid ??
+            (typeof item.requestCid === "string" ? item.requestCid : undefined) ??
+            undefined,
         };
-        const messageBytes = canonicalizeToCbor(message);
-        const signatureBytes = new Uint8Array(Buffer.from(item.signature, "base64"));
-        const publicKeyRaw = rawPublicKeyFromAddress(item.signedBy);
-        const verified = await verifyEd25519(publicKeyRaw, messageBytes, signatureBytes);
+
+        const outcome = await verifyAttestationSignature(parsedMetadata, bundle);
+
         if (!cancelled) {
-          const nextStatus: VerificationState = verified ? "verified" : "invalid";
-          setVerification(nextStatus);
-          onStatusUpdate?.(item.metadataCid, verified ? "Verified" : "Invalid");
+          if (outcome.status === "Verified") {
+            setVerification("verified");
+            setVerificationError(null);
+            onStatusUpdate?.(item.metadataCid, "Verified");
+          } else if (outcome.status === "Invalid") {
+            setVerification("invalid");
+            setVerificationError(outcome.reason ?? "Signature verification failed");
+            onStatusUpdate?.(item.metadataCid, "Invalid");
+          } else {
+            setVerification("loading");
+            setVerificationError(outcome.reason ?? "Awaiting attestation signature");
+          }
         }
       } catch (error) {
         console.error("Failed to verify attestation", error);
@@ -128,6 +208,22 @@ export const AttestationDrawer = ({ open, onClose, item, onStatusUpdate }: Attes
   }, [open, item, onStatusUpdate]);
 
   const content = useMemo(() => item ?? null, [item]);
+  const metadataAttestation = metadata?.attestation;
+  const displayReserveUSD =
+    metadata?.reserveAmount ??
+    requestMetadata?.asset?.valueUSD ??
+    (content?.reserveUSD ?? 0);
+  const displayTimestamp = metadata?.timestamp ?? requestMetadata?.timestamp ?? (content?.ts ?? "");
+  const displaySignedBy =
+    metadataAttestation?.signedBy ??
+    metadata?.issuer ??
+    requestMetadata?.issuer ??
+    (content?.signedBy ?? "—");
+  const displaySignature = metadataAttestation?.signature ?? (content?.signature && content.signature !== "-" ? content.signature : "");
+  const proofHash = metadata?.fileCid ?? requestMetadata?.proofCid ?? (content?.ipfs.hash ?? undefined);
+  const proofUrl = metadata?.fileCid
+    ? getViaGateway(metadata.fileCid)
+    : requestMetadata?.proofUrl ?? (proofHash ? getViaGateway(proofHash) : undefined);
 
   if (!mounted) return null;
 
@@ -176,7 +272,7 @@ export const AttestationDrawer = ({ open, onClose, item, onStatusUpdate }: Attes
             <div className="mt-6 space-y-4 text-sm">
               <div className="flex items-center justify-between">
                 <span className="text-muted-foreground">Reserve</span>
-                <span className="font-semibold text-foreground">{formatUSD(content.reserveUSD)}</span>
+                <span className="font-semibold text-foreground">{formatUSD(displayReserveUSD)}</span>
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-muted-foreground">Verification</span>
@@ -203,14 +299,16 @@ export const AttestationDrawer = ({ open, onClose, item, onStatusUpdate }: Attes
               <div>
                 <span className="text-muted-foreground">Proof</span>
                 <div className="mt-2 flex items-center gap-2">
-                  <CopyHash value={content.ipfs.hash} />
-                  <button
-                    type="button"
-                    onClick={() => window.open(content.ipfs.url, "_blank", "noopener,noreferrer")}
-                    className="rounded-full border border-border/60 px-3 py-1 text-xs font-semibold text-foreground transition hover:border-primary/50 hover:text-primary"
-                  >
-                    Open
-                  </button>
+                  {proofHash ? <CopyHash value={proofHash} /> : <span className="text-foreground/60">—</span>}
+                  {proofUrl ? (
+                    <button
+                      type="button"
+                      onClick={() => window.open(proofUrl, "_blank", "noopener,noreferrer")}
+                      className="rounded-full border border-border/60 px-3 py-1 text-xs font-semibold text-foreground transition hover:border-primary/50 hover:text-primary"
+                    >
+                      Open
+                    </button>
+                  ) : null}
                 </div>
               </div>
               <div>
@@ -234,17 +332,32 @@ export const AttestationDrawer = ({ open, onClose, item, onStatusUpdate }: Attes
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-muted-foreground">Signed By</span>
-                <span className="font-semibold text-foreground">{content.signedBy}</span>
+                <span className="font-semibold text-foreground">{displaySignedBy}</span>
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-muted-foreground">Timestamp</span>
-                <span className="font-semibold text-foreground">{formatDateTime(content.ts)}</span>
+                <span className="font-semibold text-foreground">{displayTimestamp ? formatDateTime(displayTimestamp) : "—"}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-muted-foreground">Signature</span>
+                {displaySignature ? (
+                  <CopyHash value={displaySignature} />
+                ) : (
+                  <span className="text-foreground/60">—</span>
+                )}
               </div>
               {metadata ? (
                 <div className="rounded-xl border border-border/40 bg-border/10 p-3 text-xs">
                   <p className="mb-1 text-[11px] uppercase tracking-wide text-muted-foreground">Metadata</p>
                   <pre className="whitespace-pre-wrap break-all text-foreground/80">
                     {JSON.stringify(metadata, null, 2)}
+                  </pre>
+                </div>
+              ) : requestMetadata ? (
+                <div className="rounded-xl border border-border/40 bg-border/10 p-3 text-xs">
+                  <p className="mb-1 text-[11px] uppercase tracking-wide text-muted-foreground">Request metadata</p>
+                  <pre className="whitespace-pre-wrap break-all text-foreground/80">
+                    {JSON.stringify(requestMetadata, null, 2)}
                   </pre>
                 </div>
               ) : verification === "loading" ? (

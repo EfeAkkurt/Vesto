@@ -5,8 +5,37 @@ export type NavItem = {
   icon: "dashboard" | "tokenize" | "custodian" | "proofs" | "bridge";
 };
 
-export const HORIZON = process.env.NEXT_PUBLIC_HORIZON_URL!;
-export const STELLAR_NET = process.env.NEXT_PUBLIC_STELLAR_NETWORK!;
+const horizonCandidate = (process.env.NEXT_PUBLIC_HORIZON_URL ?? "").trim();
+if (!horizonCandidate) {
+  throw new Error("NEXT_PUBLIC_HORIZON_URL is required.");
+}
+export const HORIZON = horizonCandidate;
+
+const networkCandidate = (process.env.NEXT_PUBLIC_STELLAR_NETWORK ?? "").trim();
+if (!networkCandidate) {
+  throw new Error("NEXT_PUBLIC_STELLAR_NETWORK is required.");
+}
+export const STELLAR_NET = networkCandidate;
+
+const requiredEnv = [
+  ["NEXT_PUBLIC_CUSTODIAN_ACCOUNT", process.env.NEXT_PUBLIC_CUSTODIAN_ACCOUNT],
+  ["NEXT_PUBLIC_ISSUER_ACCOUNT", process.env.NEXT_PUBLIC_ISSUER_ACCOUNT],
+  ["NEXT_PUBLIC_TOKEN_ASSET_CODE", process.env.NEXT_PUBLIC_TOKEN_ASSET_CODE],
+  ["NEXT_PUBLIC_TOKEN_ASSET_ISSUER", process.env.NEXT_PUBLIC_TOKEN_ASSET_ISSUER],
+] as const;
+
+const missingEnv = requiredEnv
+  .map(([key, value]) => [key, value?.trim() ?? ""] as const)
+  .filter(([, value]) => value.length === 0)
+  .map(([key]) => key);
+
+if (missingEnv.length) {
+  const message = `Missing required environment variables: ${missingEnv.join(", ")}`;
+  if (typeof window !== "undefined") {
+    console.warn(message);
+  }
+  throw new Error(message);
+}
 
 const DEFAULT_IPFS_GATEWAY = "https://gateway.lighthouse.storage/ipfs/";
 

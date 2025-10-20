@@ -66,6 +66,7 @@ export interface Attestation {
   reserveUSD: number;
   ipfs: ProofRef;
   metadataCid: string;
+  memoHashHex?: string;
   signedBy: string;
   signature: string;
   signatureType: "ed25519";

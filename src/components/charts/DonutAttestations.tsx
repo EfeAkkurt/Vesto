@@ -102,9 +102,11 @@ export const DonutAttestations = ({ attestations, isLoading }: DonutAttestations
           </div>
         </div>
         <div className="space-y-3">
-          {attestations.slice(0, 4).map((item) => (
+          {attestations.slice(0, 4).map((item, index) => {
+            const key = item.metadataCid || item.txHash || `${item.week}-${index}`;
+            return (
             <div
-              key={item.week}
+              key={key}
               className="flex items-start justify-between gap-3 rounded-xl border border-border/40 bg-card/40 px-3 py-2"
             >
               <div>
@@ -125,7 +127,8 @@ export const DonutAttestations = ({ attestations, isLoading }: DonutAttestations
                 </Link>
               </div>
             </div>
-          ))}
+            );
+          })}
         </div>
       </div>
     </ChartWrapper>

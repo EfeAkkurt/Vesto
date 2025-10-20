@@ -50,11 +50,13 @@ export const AttestationTimeline = ({ items, onOpen }: AttestationTimelineProps)
         variants={prefersReducedMotion ? undefined : listVariants}
         className="space-y-6"
       >
-        {items.map((item) => {
+        {items.map((item, index) => {
+          const key = item.metadataCid || item.txHash || `${item.week}-${index}`;
+          const hasSignature = Boolean(item.signature);
           const styles = statusStyles[item.status];
           return (
             <motion.li
-              key={item.week}
+              key={key}
               variants={prefersReducedMotion ? undefined : itemVariants}
               className="relative grid gap-3 rounded-xl border border-border/50 bg-background/40 p-4 md:grid-cols-[auto,1fr,auto] md:items-start"
             >
@@ -75,21 +77,21 @@ export const AttestationTimeline = ({ items, onOpen }: AttestationTimelineProps)
                   <span className="font-medium text-foreground/80">File</span>
                   <CopyHash value={item.ipfs.hash} />
                 </div>
-              <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
-                <span className="font-medium text-foreground/80">Metadata</span>
-                <CopyHash value={item.metadataCid} />
-              </div>
-              {item.requestCid ? (
                 <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
-                  <span className="font-medium text-foreground/80">Request CID</span>
-                  <CopyHash value={item.requestCid} />
+                  <span className="font-medium text-foreground/80">Metadata</span>
+                  <CopyHash value={item.metadataCid} />
                 </div>
-              ) : null}
-              <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
-                <span className="font-medium text-foreground/80">Signature</span>
-                <CopyHash value={item.signature} />
-              </div>
-              <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
+                {item.requestCid ? (
+                  <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
+                    <span className="font-medium text-foreground/80">Request CID</span>
+                    <CopyHash value={item.requestCid} />
+                  </div>
+                ) : null}
+                <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
+                  <span className="font-medium text-foreground/80">Signature</span>
+                  {hasSignature ? <CopyHash value={item.signature} /> : <span className="text-foreground/60">—</span>}
+                </div>
+                <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
                   <span className="font-medium text-foreground/80">TxHash</span>
                   <CopyHash value={item.txHash} />
                 </div>

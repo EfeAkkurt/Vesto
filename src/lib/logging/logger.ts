@@ -1,4 +1,4 @@
-const isProduction = process.env.NODE_ENV === "production";
+const debugEnabled = process.env.NEXT_PUBLIC_DEBUG === "1";
 
 const safeSerialize = (payload: unknown): string => {
   try {
@@ -9,11 +9,11 @@ const safeSerialize = (payload: unknown): string => {
 };
 
 export const debug = (tag: string, ...rest: unknown[]): void => {
-  if (isProduction) return;
+  if (!debugEnabled) return;
   console.debug(tag, ...rest);
 };
 
 export const debugObj = (tag: string, payload: unknown): void => {
-  if (isProduction) return;
+  if (!debugEnabled) return;
   console.debug(tag, safeSerialize(payload));
 };

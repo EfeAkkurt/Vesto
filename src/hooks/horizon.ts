@@ -2,7 +2,7 @@
 
 import { useMemo } from "react";
 import useSWR, { type SWRConfiguration, type SWRResponse } from "swr";
-import { loadStellar } from "@/src/lib/stellar/sdk";
+import { getServer as getHorizonServer } from "@/src/lib/stellar/sdk";
 
 const RATE_LIMIT_DELAY_MS = 15_000;
 const DEFAULT_LIMIT = 25;
@@ -69,6 +69,31 @@ export type HorizonEffect = {
   paging_token?: string;
   [key: string]: unknown;
 };
+
+export type HorizonOperation = {
+  id: string;
+  type: string;
+  created_at: string;
+  transaction_hash: string;
+  transaction_successful?: boolean;
+  source_account?: string;
+  from?: string;
+  to?: string;
+  amount?: string;
+  asset_type?: string;
+  asset_code?: string;
+  asset_issuer?: string;
+  name?: string;
+  value?: string | null;
+  body?: unknown;
+  memo?: string | null;
+  transaction_attr?: {
+    memo_type?: string | null;
+    memo?: string | null;
+    signatures?: string[];
+  };
+  [key: string]: unknown;
+};
 export type HorizonLedger = {
   id: string;
   sequence: number;
@@ -90,6 +115,8 @@ type PaymentCallBuilder = {
   order(direction: "asc" | "desc"): PaymentCallBuilder;
   limit(limit: number): PaymentCallBuilder;
   cursor(token: string): PaymentCallBuilder;
+  join?(resource: string): PaymentCallBuilder;
+  includeTransactions?(include: boolean): PaymentCallBuilder;
   call(): Promise<CollectionPage<HorizonPayment>>;
   stream(config: { onmessage: (record: HorizonPayment) => void; onerror?: (error: unknown) => void }): () => void;
 };
@@ -99,6 +126,15 @@ type EffectCallBuilder = {
   order(direction: "asc" | "desc"): EffectCallBuilder;
   limit(limit: number): EffectCallBuilder;
   call(): Promise<CollectionPage<HorizonEffect>>;
+};
+
+type OperationCallBuilder = {
+  forAccount(accountId: string): OperationCallBuilder;
+  order(direction: "asc" | "desc"): OperationCallBuilder;
+  limit(limit: number): OperationCallBuilder;
+  includeTransactions?(include: boolean): OperationCallBuilder;
+  join?(resource: string): OperationCallBuilder;
+  call(): Promise<CollectionPage<HorizonOperation>>;
 };
 
 type LedgerCallBuilder = {
@@ -112,22 +148,9 @@ type StellarServer = {
   fetchBaseFee(): Promise<number>;
   payments(): PaymentCallBuilder;
   effects(): EffectCallBuilder;
+  operations(): OperationCallBuilder;
   ledgers(): LedgerCallBuilder;
   submitTransaction(tx: unknown): Promise<{ hash: string }>;
-};
-
-let cachedServer: StellarServer | null = null;
-
-const getServer = async (): Promise<StellarServer> => {
-  if (cachedServer) return cachedServer;
-  const horizonUrl = process.env.NEXT_PUBLIC_HORIZON_URL;
-  if (!horizonUrl) {
-    throw new Error("NEXT_PUBLIC_HORIZON_URL is not configured");
-  }
-  type StellarServerConstructor = new (serverUrl: string) => StellarServer;
-  const { Server } = (await loadStellar()) as unknown as { Server: StellarServerConstructor };
-  cachedServer = new Server(horizonUrl);
-  return cachedServer;
 };
 
 const parseRetryAfter = (value: unknown): number | undefined => {
@@ -206,7 +229,7 @@ const withRateLimitRetry: SWRConfiguration["onErrorRetry"] = (error, _key, _conf
   }, delay);
 };
 
-const swrDefaults: SWRConfiguration = {
+export const swrDefaults: SWRConfiguration = {
   revalidateOnFocus: false,
   revalidateOnReconnect: true,
   dedupingInterval: 10_000,
@@ -215,7 +238,7 @@ const swrDefaults: SWRConfiguration = {
   onErrorRetry: withRateLimitRetry,
 };
 
-const wrapCall = async <T>(fn: () => Promise<T>): Promise<T> => {
+export const wrapCall = async <T>(fn: () => Promise<T>): Promise<T> => {
   try {
     return await fn();
   } catch (error) {
@@ -224,7 +247,7 @@ const wrapCall = async <T>(fn: () => Promise<T>): Promise<T> => {
 };
 
 const fetchAccount = async ([, accountId]: [string, string]): Promise<HorizonAccount> => {
-  const server = await getServer();
+  const server = (await getHorizonServer()) as unknown as StellarServer;
   const account = await wrapCall(() => server.loadAccount(accountId));
   return {
     id: account.id,
@@ -238,23 +261,65 @@ const fetchAccount = async ([, accountId]: [string, string]): Promise<HorizonAcc
 };
 
 const fetchPayments = async ([, accountId, limit]: [string, string, number | undefined]): Promise<HorizonPayment[]> => {
-  const server = await getServer();
-  const page = await wrapCall(() =>
-    server.payments().forAccount(accountId).order("desc").limit(limit ?? DEFAULT_LIMIT).call(),
-  );
-  return page.records;
+  const server = (await getHorizonServer()) as unknown as StellarServer;
+  const safeLimit = Number.isFinite(limit) ? Math.max(1, Math.min(200, Math.trunc(limit!))) : DEFAULT_LIMIT;
+  let builder = server.payments().forAccount(accountId).order("desc").limit(safeLimit);
+  if (typeof builder.includeTransactions === "function") {
+    builder = builder.includeTransactions(true);
+  } else if (typeof builder.join === "function") {
+    builder = builder.join("transactions");
+  }
+  const page = await wrapCall(() => builder.call());
+  return page.records.map((record) => {
+    if (record.transaction_attr || !(record as unknown as { transaction?: unknown }).transaction) {
+      return record;
+    }
+    const tx = (record as unknown as { transaction?: unknown }).transaction;
+    if (!tx || typeof tx !== "object") {
+      return record;
+    }
+    return {
+      ...record,
+      transaction_attr: tx as HorizonPayment["transaction_attr"],
+    };
+  });
 };
 
 const fetchEffects = async ([, accountId, limit]: [string, string, number | undefined]): Promise<HorizonEffect[]> => {
-  const server = await getServer();
+  const server = (await getHorizonServer()) as unknown as StellarServer;
   const page = await wrapCall(() =>
     server.effects().forAccount(accountId).order("desc").limit(limit ?? DEFAULT_LIMIT).call(),
   );
   return page.records;
 };
 
+const fetchOperations = async ([, accountId, limit]: [string, string, number | undefined]): Promise<HorizonOperation[]> => {
+  const server = (await getHorizonServer()) as unknown as StellarServer;
+  const safeLimit = Number.isFinite(limit) ? Math.max(1, Math.min(200, Math.trunc(limit!))) : DEFAULT_LIMIT;
+  let builder = server.operations().forAccount(accountId).order("desc").limit(safeLimit);
+  if (typeof builder.includeTransactions === "function") {
+    builder = builder.includeTransactions(true);
+  } else if (typeof builder.join === "function") {
+    builder = builder.join("transactions");
+  }
+  const page = await wrapCall(() => builder.call());
+  return page.records.map((record) => {
+    if (record.transaction_attr || !(record as unknown as { transaction?: unknown }).transaction) {
+      return record;
+    }
+    const tx = (record as unknown as { transaction?: unknown }).transaction;
+    if (!tx || typeof tx !== "object") {
+      return record;
+    }
+    return {
+      ...record,
+      transaction_attr: tx as HorizonOperation["transaction_attr"],
+    };
+  });
+};
+
 const fetchLatestLedger = async (): Promise<HorizonLedger> => {
-  const server = await getServer();
+  const server = (await getHorizonServer()) as unknown as StellarServer;
   const page = await wrapCall(() => server.ledgers().order("desc").limit(1).call());
   if (!page.records.length) {
     throw new Error("No ledger records returned");
@@ -294,6 +359,16 @@ export const useAccountEffects = (accountId?: string, limit = DEFAULT_LIMIT) => 
   } as SWRResponse<HorizonEffect[], RateLimitError>;
 };
 
+export const useAccountOperations = (accountId?: string, limit = DEFAULT_LIMIT) =>
+  useSWR<HorizonOperation[], RateLimitError>(
+    accountId ? ["operations", accountId, limit] : null,
+    fetchOperations,
+    {
+      ...swrDefaults,
+      refreshInterval: 20_000,
+    },
+  );
+
 export const useLedgersLatest = () =>
   useSWR<HorizonLedger, RateLimitError>(["ledger", "latest"], fetchLatestLedger, {
     ...swrDefaults,
@@ -305,7 +380,7 @@ export const streamPayments = async (
   onMessage: (record: HorizonPayment) => void,
   onError?: (error: RateLimitError) => void,
 ): Promise<() => void> => {
-  const server = await getServer();
+  const server = (await getHorizonServer()) as unknown as StellarServer;
   const close = server
     .payments()
     .forAccount(accountId)

@@ -1,8 +1,7 @@
 "use client";
 
 import useSWR from "swr";
-import { loadStellar } from "@/src/lib/stellar/sdk";
-import { HORIZON } from "@/src/utils/constants";
+import { getServer as getHorizonServer } from "@/src/lib/stellar/sdk";
 
 type HorizonServerLike = {
   assets(): {
@@ -14,11 +13,8 @@ type HorizonServerLike = {
   };
 };
 
-type HorizonServerCtor = new (url: string) => HorizonServerLike;
-
 const fetchAssetSupply = async (_: string, code: string, issuer: string) => {
-  const { Server } = await loadStellar();
-  const server = new (Server as HorizonServerCtor)(HORIZON);
+  const server = (await getHorizonServer()) as unknown as HorizonServerLike;
   const page = await server.assets().forCode(code).forIssuer(issuer).call();
   if (!page.records.length) return 0;
   const amount = Number.parseFloat(page.records[0].amount ?? "0");
