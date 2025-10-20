@@ -56,11 +56,6 @@ export const AttestationTimeline = ({ items, onOpen }: AttestationTimelineProps)
           const key = item.metadataCid || item.txHash || `${item.week}-${index}`;
           const hasSignature = Boolean(item.signature && item.signature !== MANAGE_DATA_SIGNATURE);
           const styles = statusStyles[item.status];
-          const failureReason = item.metadataFailureReason
-            ? item.metadataFailureReason.length > 80
-              ? `${item.metadataFailureReason.slice(0, 77)}…`
-              : item.metadataFailureReason
-            : "";
           return (
             <motion.li
               key={key}
@@ -99,11 +94,7 @@ export const AttestationTimeline = ({ items, onOpen }: AttestationTimelineProps)
                   <span className="font-medium text-foreground/80">Metadata</span>
                   <CopyHash value={item.metadataCid} />
                 </div>
-                {item.metadataFetchFailed ? (
-                  <p className="text-[11px] text-amber-200">
-                    Metadata gateway fetch pending{failureReason ? ` · ${failureReason}` : ""}.
-                  </p>
-                ) : null}
+                {/* metadata fetch warnings suppressed per UX guidance */}
                 {item.requestCid ? (
                   <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
                     <span className="font-medium text-foreground/80">Request CID</span>

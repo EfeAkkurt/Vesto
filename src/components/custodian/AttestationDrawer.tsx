@@ -101,18 +101,27 @@ export const AttestationDrawer = ({ open, onClose, item, onStatusUpdate }: Attes
           setMetadata(outcome.metadata);
         }
 
-        if (outcome.status === "Verified") {
-          setVerification("verified");
-          setVerificationError(null);
-          onStatusUpdate?.(item.metadataCid, "Verified");
-        } else if (outcome.status === "Invalid") {
-          setVerification("invalid");
-          setVerificationError(outcome.reason ?? "mismatch");
-          onStatusUpdate?.(item.metadataCid, "Invalid");
+        let nextStatus: Attestation["status"];
+        let nextVerification: VerificationState;
+        let nextError: string | null = null;
+
+        if (outcome.status === "Invalid") {
+          nextStatus = "Invalid";
+          nextVerification = "invalid";
+          nextError = outcome.reason ?? "mismatch";
+        } else if (outcome.status === "Recorded") {
+          nextStatus = "Recorded";
+          nextVerification = "recorded";
+          nextError = outcome.reason ?? null;
         } else {
-          setVerification("recorded");
-          setVerificationError(outcome.reason ?? null);
-          onStatusUpdate?.(item.metadataCid, "Recorded");
+          nextStatus = "Verified";
+          nextVerification = "verified";
+        }
+
+        setVerification(nextVerification);
+        setVerificationError(nextError);
+        if (item.status !== nextStatus) {
+          onStatusUpdate?.(item.metadataCid, nextStatus);
         }
 
         const requestCid =
@@ -311,7 +320,7 @@ export const AttestationDrawer = ({ open, onClose, item, onStatusUpdate }: Attes
                 </div>
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-muted-foreground">Signed By</span>
+                <span className="text-muted-foreground">Issuer</span>
                 <span className="font-semibold text-foreground">{displaySignedBy}</span>
               </div>
               <div className="flex items-center justify-between">

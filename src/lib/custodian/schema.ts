@@ -2,14 +2,14 @@ import { z } from "zod";
 
 export const AttestationMetadataSchema = z.object({
   schema: z.string(),
-  week: z.number().int().nonnegative(),
-  reserveAmount: z.number().nonnegative(),
+  week: z.coerce.number().int().nonnegative(),
+  reserveAmount: z.coerce.number().nonnegative(),
   fileCid: z.string().min(1),
   proofCid: z.string().min(1).optional(),
   issuer: z.string().min(1),
   timestamp: z.string().min(1),
   mime: z.string().optional(),
-  size: z.number().nonnegative().optional(),
+  size: z.coerce.number().nonnegative().optional(),
   attestation: z
     .object({
       nonce: z.string().min(8),
@@ -36,8 +36,8 @@ export const AttestationMetadataSchema = z.object({
 export type AttestationMetadata = z.infer<typeof AttestationMetadataSchema>;
 
 export const AttestationMsgSchema = z.object({
-  week: z.number().int().nonnegative(),
-  reserveAmount: z.number().nonnegative(),
+  week: z.coerce.number().int().nonnegative(),
+  reserveAmount: z.coerce.number().nonnegative(),
   timestamp: z.string().min(1),
   nonce: z.string().min(8),
 });

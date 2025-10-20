@@ -301,6 +301,8 @@ const buildAttestation = async (
     );
 
     const metadata = verifyResult.metadata ?? null;
+    const finalStatus: Attestation["status"] = verifyResult.status;
+
     const fileCid =
       metadata?.fileCid ??
       metadata?.proofCid ??
@@ -347,13 +349,13 @@ const buildAttestation = async (
       signature: signatureString,
       signatureType,
       nonce,
-      status: verifyResult.status,
+      status: finalStatus,
       ts: timestamp,
       txHash: candidate.payment.transaction_hash,
       requestCid: requestCid ?? undefined,
       signatureCount: sigCount ?? 0,
-      metadataFetchFailed: verifyResult.status === "Recorded" && !metadata,
-      metadataFailureReason: verifyResult.reason,
+      metadataFetchFailed: !metadata,
+      metadataFailureReason: metadata ? undefined : verifyResult.reason,
       feeXlm,
       sigCount,
       txSourceAccount: txSourceAccount ?? undefined,
@@ -392,8 +394,7 @@ const buildAttestation = async (
       requestCid: effectBundle?.requestCid,
       signatureCount: sigCount ?? 0,
       metadataFetchFailed: true,
-      metadataFailureReason:
-        error instanceof Error ? error.message : "metadata-fetch-failed",
+      metadataFailureReason: error instanceof Error ? error.message : "metadata-fetch-failed",
       feeXlm,
       sigCount,
       txSourceAccount,
@@ -446,7 +447,7 @@ const scheduleRevalidations = (attestations: Attestation[]) => {
       }
       return;
     }
-    if (att.status !== "Recorded") {
+    if (att.status !== "Recorded" || !att.metadataFetchFailed) {
       return;
     }
     if (existing) {
