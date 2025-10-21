@@ -8,7 +8,8 @@ import type { WalletHook } from "@/src/hooks/useWallet";
 import type { NetworkHealth } from "@/src/hooks/useNetworkHealth";
 import { SIDEBAR_NAV } from "@/src/utils/constants";
 import { cn } from "@/src/utils/cn";
-import { shortAddress, formatCurrency } from "@/src/lib/utils/format";
+import { formatUSD, formatUSDCompact, formatXLM } from "@/src/lib/utils/format";
+import { shortAddress } from "@/src/lib/utils/text";
 import ConnectWalletButton from "@/components/ConnectWalletButton";
 import NetworkStatus from "@/components/NetworkStatus";
 
@@ -106,6 +107,19 @@ export const Sidebar = ({
     ? "Check network"
     : "Wallet";
 
+  const portfolioDisplay =
+    wallet.balanceUSD == null
+      ? "—"
+      : (() => {
+          const numeric = Number(wallet.balanceUSD);
+          if (Number.isFinite(numeric)) {
+            return Math.abs(numeric) >= 10_000 ? formatUSDCompact(numeric) : formatUSD(numeric);
+          }
+          return formatUSD(wallet.balanceUSD);
+        })();
+
+  const nativeDisplay = wallet.balanceNative != null ? `${formatXLM(wallet.balanceNative)} XLM` : "—";
+
   return (
     <aside
       className={cn(
@@ -165,13 +179,13 @@ export const Sidebar = ({
               <div className="flex items-center justify-between">
                 <span className="text-muted-foreground">Portfolio</span>
                 <span className="text-lg font-semibold text-primary">
-                  {wallet.balanceUSD != null ? formatCurrency(wallet.balanceUSD, { compact: true }) : "—"}
+                  {portfolioDisplay}
                 </span>
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-muted-foreground">Native</span>
                 <span className="font-semibold text-foreground/80">
-                  {wallet.balanceNative != null ? `${wallet.balanceNative} XLM` : "—"}
+                  {nativeDisplay}
                 </span>
               </div>
             </div>

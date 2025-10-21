@@ -4,9 +4,11 @@ import type { FC } from "react";
 import Link from "next/link";
 import { motion, useReducedMotion } from "framer-motion";
 import type { PayoutSchedule } from "@/src/lib/dashboard/types";
-import { formatCurrency, formatDate } from "@/src/lib/utils/format";
+import { formatDate, formatUSD } from "@/src/lib/utils/format";
+import { shortHash } from "@/src/lib/utils/text";
 import { transitions, fadeScale } from "@/src/components/motion/presets";
-import { Skeleton } from "@/src/components/ui/Skeleton";
+import { SkeletonRow } from "@/src/components/shared/SkeletonRow";
+import { EmptyState } from "@/src/components/shared/EmptyState";
 
 export type UpcomingPayoutCardProps = {
   schedule?: PayoutSchedule;
@@ -16,12 +18,12 @@ export type UpcomingPayoutCardProps = {
 export const UpcomingPayoutCard: FC<UpcomingPayoutCardProps> = ({ schedule, isLoading }) => {
   const prefersReducedMotion = useReducedMotion();
   const nextLabel = schedule
-    ? `${formatCurrency(schedule.nextAmount)} in ${schedule.windowDays} day${schedule.windowDays === 1 ? "" : "s"}`
+    ? `${formatUSD(schedule.nextAmount)} in ${schedule.windowDays} day${schedule.windowDays === 1 ? "" : "s"}`
     : "No payouts";
 
   return (
     <motion.section
-      className="flex h-full flex-col rounded-2xl border border-border/60 bg-card/60 p-6 shadow-sm backdrop-blur"
+      className="flex h-full flex-col overflow-hidden rounded-2xl border border-white/5 bg-white/[0.02] p-5 shadow-sm md:p-6"
       initial={prefersReducedMotion ? undefined : "hidden"}
       animate={prefersReducedMotion ? undefined : "visible"}
       variants={prefersReducedMotion ? undefined : fadeScale}
@@ -41,7 +43,7 @@ export const UpcomingPayoutCard: FC<UpcomingPayoutCardProps> = ({ schedule, isLo
       </header>
       <div className="mt-4 space-y-4">
         {isLoading ? (
-          <Skeleton className="h-16 w-full" />
+          <SkeletonRow lines={3} className="w-full" />
         ) : schedule ? (
           <div className="rounded-xl border border-border/50 bg-border/10 px-4 py-3">
             <p className="text-xs uppercase tracking-wide text-muted-foreground">Next distribution</p>
@@ -53,31 +55,37 @@ export const UpcomingPayoutCard: FC<UpcomingPayoutCardProps> = ({ schedule, isLo
             No payouts scheduled.
           </div>
         )}
-        <div className="space-y-3">
+        <div className="flex-1 space-y-3">
           <p className="text-xs uppercase tracking-wide text-muted-foreground">Recent distributions</p>
           {isLoading ? (
             <div className="space-y-2">
-              <Skeleton className="h-10 w-full" />
-              <Skeleton className="h-10 w-full" />
-              <Skeleton className="h-10 w-full" />
+              <SkeletonRow lines={2} />
+              <SkeletonRow lines={2} />
+              <SkeletonRow lines={2} />
             </div>
           ) : schedule ? (
-            schedule.history.map((item) => (
-              <div
-                key={item.date}
-                className="flex items-center justify-between rounded-lg border border-border/40 bg-card/40 px-3 py-2 text-xs"
-              >
-                <div>
-                  <p className="font-semibold text-foreground/80">{formatDate(item.date)}</p>
-                  <p className="text-muted-foreground">
-                    {item.ipfs ? `IPFS ${item.ipfs}` : "Pending CID"}
-                  </p>
+            <div className="max-h-[28rem] space-y-2 overflow-auto pr-1">
+              {schedule.history.map((item) => (
+                <div
+                  key={item.date}
+                  className="flex items-center justify-between rounded-lg border border-white/5 bg-white/[0.02] px-3 py-2 text-xs"
+                >
+                  <div>
+                    <p className="font-semibold text-foreground/80">{formatDate(item.date)}</p>
+                    <p className="text-muted-foreground">
+                      {item.ipfs ? `IPFS ${shortHash(item.ipfs)}` : "Pending CID"}
+                    </p>
+                  </div>
+                  <span className="font-semibold text-primary no-wrap">{formatUSD(item.amount)}</span>
                 </div>
-                <span className="font-semibold text-primary">{formatCurrency(item.amount)}</span>
-              </div>
-            ))
+              ))}
+            </div>
           ) : (
-            <p className="text-xs text-muted-foreground">No history.</p>
+            <EmptyState
+              title="No distributions"
+              hint="Distribute income to populate the history."
+              className="w-full"
+            />
           )}
         </div>
       </div>

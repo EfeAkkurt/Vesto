@@ -14,7 +14,7 @@ import {
 } from "recharts";
 import type { HoldingDatum } from "@/src/lib/dashboard/types";
 import { ChartWrapper } from "@/src/components/charts/ChartWrapper";
-import { formatCurrency } from "@/src/lib/utils/format";
+import { formatUSD } from "@/src/lib/utils/format";
 
 const colors = {
   rwa: "var(--color-primary)",
@@ -64,7 +64,7 @@ const CustomTooltip = ({ active, payload, label }: TooltipProps<number, string>)
   return (
     <div className="rounded-lg border border-border/60 bg-background/80 px-3 py-2 text-xs text-foreground shadow-lg">
       <p className="font-semibold">{label}</p>
-      <p className="mt-1 text-muted-foreground">Total {formatCurrency(datum.total)}</p>
+      <p className="mt-1 text-muted-foreground">Total {formatUSD(datum.total)}</p>
       <p className="mt-1">{percent}% RWA • {100 - percent}% Stable</p>
     </div>
   );

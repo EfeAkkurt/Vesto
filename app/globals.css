@@ -123,3 +123,20 @@
     @apply bg-background text-foreground;
   }
 }
+
+@layer utilities {
+  .no-wrap {
+    white-space: nowrap;
+  }
+
+  .ellipsis {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .break-any {
+    word-break: break-word;
+    overflow-wrap: anywhere;
+  }
+}

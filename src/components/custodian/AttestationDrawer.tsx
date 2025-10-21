@@ -5,7 +5,8 @@ import { createPortal } from "react-dom";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { CopyHash } from "@/src/components/ui/CopyHash";
 import type { Attestation } from "@/src/lib/types/proofs";
-import { formatUSD, formatDateTime } from "@/src/lib/utils/format";
+import { formatUSD, formatDateTime, formatXLM } from "@/src/lib/utils/format";
+import { shortHash } from "@/src/lib/utils/text";
 import { getViaGateway } from "@/src/lib/ipfs/client";
 import type { AttestationMetadata } from "@/src/lib/custodian/schema";
 import { TokenRequestMetadataSchema, type TokenRequestMetadata } from "@/src/lib/custodian/requests";
@@ -258,10 +259,8 @@ export const AttestationDrawer = ({ open, onClose, item, onStatusUpdate }: Attes
 
   const content = useMemo(() => item ?? null, [item]);
   const metadataAttestation = metadata?.attestation;
-  const displayReserveUSD =
-    metadata?.reserveAmount ??
-    requestMetadata?.asset?.valueUSD ??
-    (content?.reserveUSD ?? 0);
+  const displayReserveUSD = metadata?.reserveAmount ?? requestMetadata?.asset?.valueUSD ?? content?.reserveUSD ?? 0;
+  const hasVerifiedReserve = (content?.status ?? item?.status) === "Verified" || (displayReserveUSD ?? 0) > 0;
   const displayTimestamp = metadata?.timestamp ?? requestMetadata?.timestamp ?? (content?.ts ?? "");
   const displaySignedBy =
     metadataAttestation?.signedBy ??
@@ -270,14 +269,14 @@ export const AttestationDrawer = ({ open, onClose, item, onStatusUpdate }: Attes
     (content?.signedBy ?? "—");
   const displayTxSigner = content?.txSourceAccount ?? displaySignedBy;
   const displaySigCount = content?.sigCount ?? content?.signatureCount ?? 0;
-const displayFeeXlm = typeof content?.feeXlm === "number" ? content.feeXlm : undefined;
-const manageDataSignature =
-  (metadataAttestation?.signature ?? content?.signature ?? "").toUpperCase() === MANAGE_DATA_SIGNATURE;
-const displaySignature =
-  manageDataSignature || (metadataAttestation?.signature ?? "").length === 0
-    ? ""
-    : metadataAttestation?.signature ?? (content?.signature && content.signature !== "-" ? content.signature : "");
-const signatureFallbackLabel = "Auto-verified (demo mode)";
+  const displayFeeXlm = typeof content?.feeXlm === "number" ? content.feeXlm : undefined;
+  const manageDataSignature =
+    (metadataAttestation?.signature ?? content?.signature ?? "").toUpperCase() === MANAGE_DATA_SIGNATURE;
+  const displaySignature =
+    manageDataSignature || (metadataAttestation?.signature ?? "").length === 0
+      ? ""
+      : metadataAttestation?.signature ?? (content?.signature && content.signature !== "-" ? content.signature : "");
+  const signatureFallbackLabel = "Auto-verified (demo mode)";
   const proofHash = metadata?.fileCid ?? requestMetadata?.proofCid ?? (content?.ipfs.hash ?? undefined);
   const proofUrl = metadata?.fileCid
     ? getViaGateway(metadata.fileCid)
@@ -330,7 +329,9 @@ const signatureFallbackLabel = "Auto-verified (demo mode)";
             <div className="mt-6 space-y-4 text-sm">
               <div className="flex items-center justify-between">
                 <span className="text-muted-foreground">Reserve</span>
-                <span className="font-semibold text-foreground">{formatUSD(displayReserveUSD)}</span>
+                <span className="font-semibold text-foreground">
+                  {hasVerifiedReserve ? formatUSD(displayReserveUSD) : "—"}
+                </span>
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-muted-foreground">Verification</span>
@@ -367,7 +368,7 @@ const signatureFallbackLabel = "Auto-verified (demo mode)";
               {displayFeeXlm != null ? (
                 <div className="flex items-center justify-between">
                   <span className="text-muted-foreground">Fee</span>
-                  <span className="font-mono text-xs text-foreground">{displayFeeXlm.toFixed(7)} XLM</span>
+                  <span className="font-mono text-xs text-foreground">{formatXLM(displayFeeXlm)} XLM</span>
                 </div>
               ) : null}
               <div>
@@ -449,6 +450,11 @@ const signatureFallbackLabel = "Auto-verified (demo mode)";
               {verification === "error" && verificationError ? (
                 <p className="text-xs text-rose-400">Verification error: {verificationError}</p>
               ) : null}
+              <div className="mt-6 border-t border-white/10 pt-4 text-[11px] text-muted-foreground no-wrap">
+                Fee • {displayFeeXlm != null ? `${formatXLM(displayFeeXlm)} XLM` : "—"}
+                {" "}· Signed by {displayTxSigner ? shortHash(displayTxSigner, 6, 6) : "—"}
+                {" "}· {displaySigCount ?? 0} sig
+              </div>
             </div>
           </motion.aside>
         </motion.div>

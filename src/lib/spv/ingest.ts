@@ -1,6 +1,7 @@
 import { wrapCall, type HorizonPayment } from "@/src/hooks/horizon";
 import { debugObj } from "@/src/lib/logging/logger";
 import { getSpvAccount, getSusdAssetOrNull } from "@/src/utils/constants";
+import { formatXLM } from "@/src/lib/utils/format";
 export { getHolders } from "@/src/lib/spv/holders";
 import type { SpvIncome, SpvPayment } from "@/src/lib/types/spv";
 import { getHorizonServer } from "@/src/lib/stellar/horizon";
@@ -21,10 +22,7 @@ type HorizonServer = {
   payments(): PaymentsCallBuilder;
 };
 
-const toFixedAmount = (stroops: number): string => {
-  const normalized = stroops / 10_000_000;
-  return normalized.toFixed(7).replace(/0+$/u, "").replace(/\.$/u, "") || "0";
-};
+const toFixedAmount = (stroops: number): string => formatXLM(stroops / 10_000_000);
 
 const toNumber = (value?: string | number | null): number => {
   if (typeof value === "number") return Number.isFinite(value) ? value : 0;
@@ -113,7 +111,7 @@ export const fetchSpvIncome = async ({ days = 7 }: { days?: 7 | 30 } = {}): Prom
   debugObj("[spv:ingest] income snapshot", {
     windowDays,
     incomeXlm: toFixedAmount(Math.round(incomeXlm * 10_000_000)),
-    incomeSusd: incomeSusd.toFixed(7),
+    incomeSusd: formatXLM(incomeSusd),
     opsCount,
     lastTxHash,
   });

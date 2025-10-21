@@ -3,7 +3,7 @@
 import { useReducedMotion } from "framer-motion";
 import type { CSSProperties } from "react";
 import { ResponsiveContainer, AreaChart, Area, Tooltip } from "recharts";
-import { formatUSD } from "@/src/lib/utils/format";
+import { formatUSD, formatUSDCompact } from "@/src/lib/utils/format";
 
 export type TotalLockedMiniProps = {
   data: Array<{ date: string; lockedUSD: number }>;
@@ -25,7 +25,9 @@ export const TotalLockedMini = ({ data }: TotalLockedMiniProps) => {
       <div className="mb-4 flex items-center justify-between">
         <div>
           <p className="text-xs uppercase tracking-wide text-muted-foreground">Total Locked</p>
-          <p className="text-lg font-semibold text-foreground">{formatUSD(latest, { compact: true })}</p>
+          <p className="text-lg font-semibold text-foreground">
+            {Math.abs(latest) >= 10_000 ? formatUSDCompact(latest) : formatUSD(latest)}
+          </p>
         </div>
         <span className="text-xs text-muted-foreground">Trailing 7 days</span>
       </div>

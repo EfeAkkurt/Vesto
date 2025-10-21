@@ -6,7 +6,8 @@ import type { NetworkHealth } from "@/src/hooks/useNetworkHealth";
 import type { HorizonAccount, HorizonAccountBalance } from "@/src/hooks/horizon";
 import type { WalletHook } from "@/src/hooks/useWallet";
 import { transitions, fadeScale } from "@/src/components/motion/presets";
-import { formatCurrency, formatDateTime, shortAddress } from "@/src/lib/utils/format";
+import { formatDateTime, formatUSD, formatUSDCompact, formatXLM } from "@/src/lib/utils/format";
+import { shortAddress } from "@/src/lib/utils/text";
 
 const formatLatency = (latencyMs: number) => {
   if (!Number.isFinite(latencyMs) || latencyMs <= 0) return "<1s";
@@ -41,12 +42,21 @@ export const NetworkStatusCard: FC<NetworkStatusCardProps> = ({ networkHealth, w
     account?.balances.filter(
       (balance: HorizonAccountBalance) => balance.asset_type !== "native",
     ).length ?? 0;
-  const nativeValue = nativeBalance ? `${Number.parseFloat(nativeBalance.balance).toFixed(4)} XLM` : "—";
-  const portfolioValue = wallet.balanceUSD != null ? formatCurrency(wallet.balanceUSD) : "—";
+  const nativeValue = nativeBalance ? `${formatXLM(nativeBalance.balance)} XLM` : "—";
+  const portfolioValue =
+    wallet.balanceUSD == null
+      ? "—"
+      : (() => {
+          const numeric = Number(wallet.balanceUSD);
+          if (Number.isFinite(numeric)) {
+            return Math.abs(numeric) >= 10_000 ? formatUSDCompact(numeric) : formatUSD(numeric);
+          }
+          return formatUSD(wallet.balanceUSD);
+        })();
 
   return (
     <motion.section
-      className="flex h-full flex-col gap-4 rounded-2xl border border-border/60 bg-card/60 p-6 shadow-sm backdrop-blur"
+      className="flex h-full flex-col gap-4 overflow-hidden rounded-2xl border border-white/5 bg-white/[0.02] p-5 shadow-sm md:p-6"
       initial={prefersReducedMotion ? undefined : "hidden"}
       animate={prefersReducedMotion ? undefined : "visible"}
       variants={prefersReducedMotion ? undefined : fadeScale}
@@ -61,7 +71,7 @@ export const NetworkStatusCard: FC<NetworkStatusCardProps> = ({ networkHealth, w
         <span className="size-1 rounded-full bg-primary" aria-hidden />
         <span>{formatLatency(networkHealth.latencyMs)}</span>
       </div>
-      <div className="rounded-xl border border-border/40 bg-border/10 px-4 py-3 text-xs">
+      <div className="overflow-hidden rounded-xl border border-white/5 bg-white/[0.03] px-4 py-3 text-xs">
         <div className="flex items-center justify-between">
           <span className="text-muted-foreground">Active Network</span>
           <span className="font-semibold text-primary">{networkHealth.network}</span>
@@ -91,7 +101,7 @@ export const NetworkStatusCard: FC<NetworkStatusCardProps> = ({ networkHealth, w
           </div>
         </div>
       </div>
-      <div className="rounded-xl border border-border/40 bg-card/60 px-4 py-3 text-xs">
+      <div className="overflow-hidden rounded-xl border border-white/5 bg-white/[0.03] px-4 py-3 text-xs">
         <div className="flex items-center justify-between gap-2">
           <span className="text-muted-foreground">Wallet</span>
           <span className="rounded-full border border-border/40 px-2 py-0.5 text-[11px] uppercase tracking-wide text-foreground/70">
@@ -130,7 +140,7 @@ export const NetworkStatusCard: FC<NetworkStatusCardProps> = ({ networkHealth, w
           </div>
         ) : null}
       </div>
-      <div className="rounded-xl border border-border/40 bg-border/10 px-4 py-3 text-xs">
+      <div className="overflow-hidden rounded-xl border border-white/5 bg-white/[0.03] px-4 py-3 text-xs">
         <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Permissions</p>
         <ul className="mt-2 space-y-1">
           {(wallet.permissions ?? ["signTransaction", "signMessage"]).map((permission) => (

@@ -3,7 +3,7 @@
 import { useReducedMotion } from "framer-motion";
 import type { CSSProperties } from "react";
 import { ResponsiveContainer, AreaChart, Area, Tooltip, XAxis, YAxis } from "recharts";
-import { formatUSD, formatDate } from "@/src/lib/utils/format";
+import { formatUSD, formatUSDCompact, formatDate } from "@/src/lib/utils/format";
 import type { ReservePoint } from "@/src/lib/dashboard/types";
 
 export type ReserveMiniChartProps = {
@@ -27,7 +27,9 @@ export const ReserveMiniChart = ({ data }: ReserveMiniChartProps) => {
       <div className="mb-4 flex items-center justify-between">
         <div>
           <p className="text-xs uppercase tracking-wide text-muted-foreground">Reserves</p>
-          <p className="text-lg font-semibold text-foreground">{formatUSD(latest, { compact: true })}</p>
+          <p className="text-lg font-semibold text-foreground">
+            {Math.abs(latest) >= 10_000 ? formatUSDCompact(latest) : formatUSD(latest)}
+          </p>
         </div>
         <span className="text-xs text-muted-foreground">Last 4 weeks</span>
       </div>
@@ -54,7 +56,7 @@ export const ReserveMiniChart = ({ data }: ReserveMiniChartProps) => {
               minTickGap={24}
             />
             <YAxis
-              tickFormatter={(value) => formatUSD(Number(value), { compact: true })}
+              tickFormatter={(value) => formatUSDCompact(Number(value))}
               tick={{ fontSize: 11, fill: "rgba(255,255,255,0.45)" }}
               axisLine={false}
               tickLine={false}

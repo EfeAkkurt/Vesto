@@ -296,6 +296,7 @@ const buildAttestation = async (
         memoHashHex: candidate.memoHashHex ?? null,
         requestCid: effectBundle?.requestCid ?? undefined,
         requestMemoHashHex: candidate.memoHashHex ?? undefined,
+        manageDataName: effectBundle?.manageDataName ?? undefined,
       },
       { strict: strictVerify },
     );

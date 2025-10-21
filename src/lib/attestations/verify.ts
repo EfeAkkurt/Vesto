@@ -9,6 +9,7 @@ export type VerifyAttestationContext = {
   memoHashHex?: string | null;
   requestCid?: string | null;
   requestMemoHashHex?: string | null;
+  manageDataName?: string | null;
 };
 
 export type VerifyAttestationOptions = {
@@ -101,15 +102,19 @@ export const verifyAttestation = async (
 ): Promise<VerifyAttestationResult> => {
   try {
     const metadata = await fetchMetadata(context.metadataCid);
-    // Hackathon override: treat any successfully fetched metadata as Verified.
-    // In production, re-enable strict signature/join validation to prevent spoofed payloads.
-    if (options.strict) {
-      const joined = matchesJoinRule(metadata, context);
-      if (!joined) {
-        return { status: "Invalid", metadata, reason: "mismatch" };
-      }
+    const manageName = context.manageDataName?.trim().toLowerCase();
+    const hasManageData = manageName === "vesto.attestation.cid" || manageName === "vesto.reserve.cid";
+    const joined = matchesJoinRule(metadata, context);
+
+    if (hasManageData || joined) {
+      return { status: "Verified", metadata };
     }
-    return { status: "Verified", metadata };
+
+    if (options.strict) {
+      return { status: "Invalid", metadata, reason: "join-mismatch" };
+    }
+
+    return { status: "Recorded", metadata, reason: "join-mismatch" };
   } catch (error) {
     const message = error instanceof Error ? error.message : "metadata-error";
     return {

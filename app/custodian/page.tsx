@@ -13,7 +13,7 @@ import { AttestationDrawer } from "@/src/components/custodian/AttestationDrawer"
 import { SubmissionModal } from "@/src/components/custodian/SubmissionModal";
 import type { Attestation } from "@/src/lib/types/proofs";
 import type { AttestationMetadata } from "@/src/lib/custodian/schema";
-import { formatUSD, formatDateTime, formatXlm } from "@/src/lib/utils/format";
+import { formatUSD, formatDateTime, formatXLM } from "@/src/lib/utils/format";
 import { useAccountOperations, useAccountEffects } from "@/src/hooks/horizon";
 import { useAttestations } from "@/src/hooks/useAttestations";
 import { useTokenizationRequests } from "@/src/hooks/useTokenizationRequests";
@@ -528,7 +528,7 @@ useEffect(() => {
               </div>
             ) : null}
 
-            <div className="mt-6 space-y-4">
+            <div className="mt-6 max-h-[28rem] space-y-4 overflow-auto pr-1">
               {requestsLoading ? (
                 <div className="rounded-xl border border-border/50 bg-background/40 p-6 text-center text-sm text-muted-foreground">
                   Loading on-chain requests…
@@ -568,7 +568,7 @@ useEffect(() => {
                   const proofLabel = metadataLoaded ? "Proof CID" : undefined;
                   const valueDisplay = metadataLoaded
                     ? formatUSD(request.meta?.valueUsd ?? 0)
-                    : formatXlm(request.amount);
+                    : `${formatXLM(request.amount ?? 0)} XLM`;
                   const yieldDisplay =
                     metadataLoaded && request.meta?.expectedYieldPct != null
                       ? `Expected Yield ${request.meta.expectedYieldPct}%`
@@ -578,9 +578,9 @@ useEffect(() => {
                   return (
                     <div
                       key={requestKey}
-                      className={`rounded-xl border ${
-                        isSelected ? "border-primary/60 bg-primary/5" : "border-border/50 bg-background/40"
-                      } p-5 transition`}
+                      className={`overflow-hidden rounded-2xl border ${
+                        isSelected ? "border-primary/60 bg-primary/5" : "border-white/5 bg-white/[0.02]"
+                      } p-5 shadow-sm transition md:p-6`}
                     >
                       <div className="flex flex-wrap items-start justify-between gap-4">
                         <div>

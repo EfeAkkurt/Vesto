@@ -8,7 +8,8 @@ import { useNetworkHealth } from "@/src/hooks/useNetworkHealth";
 import { useToast } from "@/src/components/ui/Toast";
 import { Button } from "@/components/ui/button";
 import { Loader } from "@/src/components/ui/Loader";
-import { Skeleton } from "@/src/components/ui/Skeleton";
+import { SkeletonRow } from "@/src/components/shared/SkeletonRow";
+import { EmptyState } from "@/src/components/shared/EmptyState";
 import { CopyHash } from "@/src/components/ui/CopyHash";
 import {
   useBridgeLocks,
@@ -22,12 +23,8 @@ import {
   refreshProofsAll,
 } from "@/src/lib/swr/mutateBus";
 import type { BridgeLock, BridgeMint, BridgeRedeem } from "@/src/lib/types/bridge";
-import {
-  formatDateTime,
-  formatNumber,
-  shortAddress,
-  shortHash,
-} from "@/src/lib/utils/format";
+import { formatDateTime, formatUSD, formatXLM } from "@/src/lib/utils/format";
+import { shortAddress, shortHash } from "@/src/lib/utils/text";
 import {
   BRIDGE_PUBLIC_ACCOUNT,
   IPFS_GATEWAY,
@@ -38,6 +35,7 @@ import {
   getBridgeEnvDiagnostics,
 } from "@/src/utils/constants";
 import { enableSusdTrustline } from "@/src/lib/bridge/changeTrust.client";
+import { cn } from "@/src/utils/cn";
 
 type TabKey = "locks" | "mints" | "redeems";
 
@@ -58,9 +56,13 @@ const toExplorerUrl = (hash: string) => `${explorerBase}${hash}`;
 const toMetadataUrl = (cid: string) => `${IPFS_GATEWAY}/${cid}`;
 
 const formatFee = (fee: number | undefined) => {
-  if (!fee || !Number.isFinite(fee)) return "0.0000000";
-  return fee.toFixed(7);
+  if (fee === undefined || !Number.isFinite(fee)) return "0";
+  return formatXLM(fee);
 };
+
+const isValidEvmAddress = (value: string): boolean => /^0x[a-fA-F0-9]{40}$/u.test(value.trim());
+
+const isValidStellarAccount = (value: string): boolean => /^G[A-Z0-9]{55}$/u.test(value.trim());
 
 const defaultStats = {
   totalLockedXlm: "0.0000000",
@@ -71,9 +73,9 @@ const defaultStats = {
 };
 
 const SectionCard = ({ title, value, subtitle }: { title: string; value: string; subtitle?: string }) => (
-  <div className="rounded-2xl border border-border/40 bg-card/60 px-4 py-5">
+  <div className="overflow-hidden rounded-2xl border border-white/5 bg-white/[0.02] p-5 shadow-sm md:p-6">
     <p className="text-xs uppercase tracking-wide text-muted-foreground">{title}</p>
-    <p className="mt-2 text-2xl font-semibold text-foreground">{value}</p>
+    <p className="mt-2 text-2xl font-semibold text-foreground no-wrap">{value}</p>
     {subtitle ? <p className="mt-1 text-xs text-muted-foreground">{subtitle}</p> : null}
   </div>
 );
@@ -85,7 +87,7 @@ const BadgeLabel = ({ tone, children }: { tone: "lock" | "mint" | "redeem"; chil
       : tone === "mint"
         ? "bg-emerald-500/15 text-emerald-300"
         : "bg-amber-500/15 text-amber-200";
-  return <span className={`rounded-full px-3 py-1 text-xs font-semibold uppercase ${palette}`}>{children}</span>;
+  return <span className={`no-wrap rounded-full px-3 py-1 text-xs font-semibold uppercase ${palette}`}>{children}</span>;
 };
 
 const StatusBadge = ({ status }: { status: "Verified" | "Recorded" | "Invalid" }) => {
@@ -95,7 +97,7 @@ const StatusBadge = ({ status }: { status: "Verified" | "Recorded" | "Invalid" }
       : status === "Recorded"
         ? "bg-amber-500/15 text-amber-200"
         : "bg-rose-500/15 text-rose-300";
-  return <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${palette}`}>{status}</span>;
+  return <span className={`no-wrap rounded-full px-2.5 py-1 text-xs font-semibold ${palette}`}>{status}</span>;
 };
 
 const DataRow = ({
@@ -116,7 +118,7 @@ const ActionLink = ({ href, label }: { href: string; label: string }) => (
     href={href}
     target="_blank"
     rel="noreferrer"
-    className="text-xs font-semibold text-primary transition hover:text-primary/80"
+    className="no-wrap text-xs font-semibold text-primary transition hover:text-primary/80"
   >
     {label}
   </Link>
@@ -155,14 +157,24 @@ const BridgeListItem = ({
   txHash,
   metadataError,
 }: BridgeListItemProps) => (
-  <li className="flex flex-col gap-3 rounded-2xl border border-border/40 bg-card/60 p-4">
+  <li className="flex flex-col gap-4 overflow-hidden rounded-2xl border border-white/5 bg-white/[0.02] p-5 shadow-sm md:p-6">
     <div className="flex flex-wrap items-center justify-between gap-3">
       <div className="flex flex-wrap items-center gap-2">
         <BadgeLabel tone={variant}>{variant.toUpperCase()}</BadgeLabel>
         <StatusBadge status={status} />
         {amount ? (
           <span className="text-sm font-semibold text-foreground">
-            {formatNumber(Number.parseFloat(amount), 2)} {assetLabel ?? ""}
+            {(() => {
+              const numeric = Number.parseFloat(amount);
+              if (!Number.isFinite(numeric)) return amount;
+              if ((assetLabel ?? "").toUpperCase() === "XLM") {
+                return `${formatXLM(numeric)} XLM`;
+              }
+              if (assetLabel) {
+                return `${formatUSD(numeric)} ${assetLabel}`;
+              }
+              return formatUSD(numeric);
+            })()}
           </span>
         ) : null}
       </div>
@@ -186,6 +198,9 @@ const BridgeListItem = ({
         value={`${shortAddress(account ?? BRIDGE_PUBLIC_ACCOUNT)} • ${sigs ?? 0} sig`}
       />
       <DataRow label="Recorded" value={createdAt ? formatDateTime(createdAt) : "—"} />
+    </div>
+    <div className="mt-4 border-t border-white/10 pt-3 text-[11px] text-muted-foreground no-wrap">
+      Fee • {formatFee(feeXlm)} XLM · Signed by {shortHash(account ?? BRIDGE_PUBLIC_ACCOUNT, 6, 6)} · {sigs ?? 0} sig
     </div>
   </li>
 );
@@ -216,6 +231,7 @@ const BridgePage = () => {
   const [lockAmount, setLockAmount] = useState("");
   const [lockAsset, setLockAsset] = useState<"XLM" | "SUSD">("XLM");
   const [lockRecipient, setLockRecipient] = useState("");
+  const [lockAttempted, setLockAttempted] = useState(false);
 
   const [mintAmount, setMintAmount] = useState("");
   const [mintTarget, setMintTarget] = useState("");
@@ -223,9 +239,11 @@ const BridgePage = () => {
   const [trustlineMissing, setTrustlineMissing] = useState(false);
   const [trustlineChecking, setTrustlineChecking] = useState(false);
   const [trustlineEnabling, setTrustlineEnabling] = useState(false);
+  const [mintAttempted, setMintAttempted] = useState(false);
 
   const [redeemAmount, setRedeemAmount] = useState("");
   const [redeemRecipient, setRedeemRecipient] = useState("");
+  const [redeemAttempted, setRedeemAttempted] = useState(false);
 
   useEffect(() => {
     setTrustlineMissing(false);
@@ -266,6 +284,64 @@ const BridgePage = () => {
 
   const statsData = stats ?? defaultStats;
 
+  const lockAmountValue = Number.parseFloat(lockAmount);
+  const lockAmountValid = Number.isFinite(lockAmountValue) && lockAmountValue > 0;
+  const lockRecipientValid = isValidEvmAddress(lockRecipient);
+  const lockFormValid = lockAmountValid && lockRecipientValid;
+  const showLockAmountError = (lockAttempted || lockAmount.length > 0) && !lockAmountValid;
+  const showLockRecipientError = (lockAttempted || lockRecipient.length > 0) && !lockRecipientValid;
+
+  const mintAmountValue = Number.parseFloat(mintAmount);
+  const mintAmountValid = Number.isFinite(mintAmountValue) && mintAmountValue > 0;
+  const mintTargetValid = isValidStellarAccount(mintTarget);
+  const mintProofValid = mintProofCid.trim().length > 0;
+  const mintBaseValid = mintAmountValid && mintTargetValid && mintProofValid;
+  const showMintAmountError = (mintAttempted || mintAmount.length > 0) && !mintAmountValid;
+  const showMintTargetError = (mintAttempted || mintTarget.length > 0) && !mintTargetValid;
+  const showMintProofError = (mintAttempted || mintProofCid.length > 0) && !mintProofValid;
+
+  const redeemAmountValue = Number.parseFloat(redeemAmount);
+  const redeemAmountValid = Number.isFinite(redeemAmountValue) && redeemAmountValue > 0;
+  const redeemRecipientValid = isValidEvmAddress(redeemRecipient);
+  const redeemFormValid = redeemAmountValid && redeemRecipientValid;
+  const showRedeemAmountError = (redeemAttempted || redeemAmount.length > 0) && !redeemAmountValid;
+  const showRedeemRecipientError = (redeemAttempted || redeemRecipient.length > 0) && !redeemRecipientValid;
+
+  const lockAmountInputClass = cn(
+    "w-full rounded-xl border border-border/40 bg-background/60 px-3 py-2 text-sm text-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/30",
+    showLockAmountError && "border-rose-500/60 focus:border-rose-400 focus:ring-rose-400/40",
+  );
+
+  const lockRecipientInputClass = cn(
+    "w-full rounded-xl border border-border/40 bg-background/60 px-3 py-2 text-sm text-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/30",
+    showLockRecipientError && "border-rose-500/60 focus:border-rose-400 focus:ring-rose-400/40",
+  );
+
+  const mintAmountInputClass = cn(
+    "w-full rounded-xl border border-border/40 bg-background/60 px-3 py-2 text-sm text-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/30",
+    showMintAmountError && "border-rose-500/60 focus:border-rose-400 focus:ring-rose-400/40",
+  );
+
+  const mintTargetInputClass = cn(
+    "w-full rounded-xl border border-border/40 bg-background/60 px-3 py-2 text-sm text-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/30",
+    showMintTargetError && "border-rose-500/60 focus:border-rose-400 focus:ring-rose-400/40",
+  );
+
+  const mintProofInputClass = cn(
+    "w-full rounded-xl border border-border/40 bg-background/60 px-3 py-2 text-sm text-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/30",
+    showMintProofError && "border-rose-500/60 focus:border-rose-400 focus:ring-rose-400/40",
+  );
+
+  const redeemAmountInputClass = cn(
+    "w-full rounded-xl border border-border/40 bg-background/60 px-3 py-2 text-sm text-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/30",
+    showRedeemAmountError && "border-rose-500/60 focus:border-rose-400 focus:ring-rose-400/40",
+  );
+
+  const redeemRecipientInputClass = cn(
+    "w-full rounded-xl border border-border/40 bg-background/60 px-3 py-2 text-sm text-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/30",
+    showRedeemRecipientError && "border-rose-500/60 focus:border-rose-400 focus:ring-rose-400/40",
+  );
+
   const checkSusdTrustline = useCallback(
     async (accountId: string) => {
       const target = accountId.trim();
@@ -304,26 +380,19 @@ const BridgePage = () => {
 
   const handleLockSubmit = () =>
     lockSubmit.wrap(async () => {
+      setLockAttempted(true);
       if (!bridgeConfigured) {
         toast({
-          title: "Bridge not configured",
-          description: "Set the NEXT_PUBLIC_* bridge environment variables to enable locking.",
+          title: "Bridge offline",
+          description: "Bridge environment variables missing on server.",
           variant: "warning",
         });
         return;
       }
-      if (!lockAmount || Number.isNaN(Number.parseFloat(lockAmount))) {
+      if (!lockFormValid) {
         toast({
-          title: "Check amount",
-          description: "Specify the amount to lock.",
-          variant: "error",
-        });
-        return;
-      }
-      if (!lockRecipient.trim()) {
-        toast({
-          title: "Recipient required",
-          description: "Provide the destination EVM address.",
+          title: "Lock details invalid",
+          description: "Fix the highlighted fields before submitting.",
           variant: "error",
         });
         return;
@@ -335,7 +404,7 @@ const BridgePage = () => {
           body: JSON.stringify({
             amount: lockAmount,
             asset: lockAsset,
-            recipient: lockRecipient,
+            recipient: lockRecipient.trim(),
             chain: "EVM",
           }),
         });
@@ -346,7 +415,7 @@ const BridgePage = () => {
           const err = "error" in json ? json.error : undefined;
           toast({
             title: "Lock failed",
-            description: err?.hint ?? err?.message ?? "Unable to submit lock transaction.",
+            description: err?.hint ?? err?.message ?? "Network rejected the transaction.",
             variant: "error",
           });
           return;
@@ -358,6 +427,7 @@ const BridgePage = () => {
         });
         setLockAmount("");
         setLockRecipient("");
+        setLockAttempted(false);
         if (json.cid) {
           setMintProofCid(json.cid);
         }
@@ -376,47 +446,37 @@ const BridgePage = () => {
 
   const handleMintSubmit = useCallback(() => {
     return wrapMintSubmit(async () => {
+      setMintAttempted(true);
       if (!bridgeConfigured) {
         toast({
-          title: "Bridge not configured",
-          description: "Configure bridge environment variables before minting.",
+          title: "Bridge offline",
+          description: "Server bridge configuration missing.",
           variant: "warning",
         });
         return;
       }
-      if (!mintAmount || Number.isNaN(Number.parseFloat(mintAmount))) {
+      if (!mintBaseValid) {
         toast({
-          title: "Check amount",
-          description: "Specify the amount to mint.",
+          title: "Mint details invalid",
+          description: "Fix the highlighted fields before submitting.",
           variant: "error",
         });
         return;
       }
-      if (!mintTarget.trim()) {
-        toast({
-          title: "Target required",
-          description: "Provide the Stellar account to receive SUSD.",
-          variant: "error",
-        });
-        return;
-      }
-      if (!mintProofCid.trim()) {
-        toast({
-          title: "Proof CID required",
-          description: "Enter the CID from the corresponding lock proof.",
-          variant: "error",
-        });
-        return;
-      }
-      const trustlineOk = await checkSusdTrustline(mintTarget);
+
+      const target = mintTarget.trim();
+      const proofCid = mintProofCid.trim();
+      const trustlineOk = await checkSusdTrustline(target);
       if (!trustlineOk) {
+        setTrustlineMissing(true);
         toast({
           title: "SUSD trustline required",
-          description: "Enable the SUSD asset before minting.",
+          description: `Add trustline to ${SUSD_PUBLIC_CODE}:${SUSD_PUBLIC_ISSUER} before minting.`,
           variant: "warning",
         });
         return;
       }
+
       setTrustlineMissing(false);
       try {
         const response = await fetch("/api/bridge/mint", {
@@ -424,9 +484,9 @@ const BridgePage = () => {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             amount: mintAmount,
-            targetAccount: mintTarget,
-            evmLockProofCid: mintProofCid,
-            lockProofCid: mintProofCid,
+            targetAccount: target,
+            evmLockProofCid: proofCid,
+            lockProofCid: proofCid,
           }),
         });
         const json = (await response.json()) as
@@ -449,7 +509,7 @@ const BridgePage = () => {
           }
           toast({
             title: "Mint failed",
-            description: hint || message || "Unable to submit mint transaction.",
+            description: hint || message || "Network rejected the transaction.",
             variant: "error",
           });
           return;
@@ -463,6 +523,7 @@ const BridgePage = () => {
         setMintAmount("");
         setMintTarget("");
         setMintProofCid("");
+        setMintAttempted(false);
         await refreshBridgeAll();
         await refreshProofsAll();
         await refreshDashboardAll();
@@ -481,6 +542,7 @@ const BridgePage = () => {
     mintAmount,
     mintProofCid,
     mintTarget,
+    mintBaseValid,
     toast,
     wrapMintSubmit,
   ]);
@@ -526,26 +588,19 @@ const BridgePage = () => {
 
   const handleRedeemSubmit = () =>
     redeemSubmit.wrap(async () => {
+      setRedeemAttempted(true);
       if (!bridgeConfigured) {
         toast({
-          title: "Bridge not configured",
-          description: "Configure bridge environment variables before redeeming.",
+          title: "Bridge offline",
+          description: "Server bridge configuration missing.",
           variant: "warning",
         });
         return;
       }
-      if (!redeemAmount || Number.isNaN(Number.parseFloat(redeemAmount))) {
+      if (!redeemFormValid) {
         toast({
-          title: "Check amount",
-          description: "Specify the amount to redeem.",
-          variant: "error",
-        });
-        return;
-      }
-      if (!redeemRecipient.trim()) {
-        toast({
-          title: "Recipient required",
-          description: "Provide the EVM recipient for redemption.",
+          title: "Redeem details invalid",
+          description: "Fix the highlighted fields before submitting.",
           variant: "error",
         });
         return;
@@ -556,7 +611,7 @@ const BridgePage = () => {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             amount: redeemAmount,
-            evmRecipient: redeemRecipient,
+            evmRecipient: redeemRecipient.trim(),
           }),
         });
         const json = (await response.json()) as
@@ -566,7 +621,7 @@ const BridgePage = () => {
           const err = "error" in json ? json.error : undefined;
           toast({
             title: "Redeem failed",
-            description: err?.hint ?? err?.message ?? "Unable to submit redeem transaction.",
+            description: err?.hint ?? err?.message ?? "Network rejected the transaction.",
             variant: "error",
           });
           return;
@@ -578,6 +633,7 @@ const BridgePage = () => {
         });
         setRedeemAmount("");
         setRedeemRecipient("");
+        setRedeemAttempted(false);
         await refreshBridgeAll();
         await refreshProofsAll();
         await refreshDashboardAll();
@@ -602,21 +658,25 @@ const BridgePage = () => {
     if (locksLoading || mintsLoading || redeemsLoading) {
       return (
         <div className="space-y-3">
-          <Skeleton className="h-20 w-full rounded-2xl" />
-          <Skeleton className="h-20 w-full rounded-2xl" />
+          <SkeletonRow lines={3} className="w-full" />
+          <SkeletonRow lines={3} className="w-full" />
         </div>
       );
     }
     if (!currentList.length) {
+      const prettyTab = activeTab.charAt(0).toUpperCase() + activeTab.slice(1);
+      const noun = activeTab.slice(0, -1);
       return (
-        <div className="rounded-2xl border border-border/40 bg-border/10 p-6 text-sm text-muted-foreground">
-          No {activeTab} recorded yet. Submit a {activeTab.slice(0, -1)} request to populate the timeline.
-        </div>
+        <EmptyState
+          title={`No ${prettyTab} yet`}
+          hint={`Submit a ${noun} request to populate the timeline.`}
+          className="w-full"
+        />
       );
     }
 
     return (
-      <ul className="space-y-3">
+      <ul className="flex flex-col gap-5 md:gap-6">
         {currentList.map((item) => {
           if (activeTab === "locks") {
             const record = item as BridgeLock;
@@ -740,7 +800,7 @@ const BridgePage = () => {
 
         <section className="mb-10 grid gap-6 lg:grid-cols-3">
           <form
-            className="flex flex-col gap-4 rounded-2xl border border-border/40 bg-card/60 p-5"
+            className="flex flex-col gap-4 overflow-hidden rounded-2xl border border-white/5 bg-white/[0.02] p-5 shadow-sm md:p-6"
             onSubmit={(event) => {
               event.preventDefault();
               void handleLockSubmit();
@@ -770,8 +830,12 @@ const BridgePage = () => {
                 value={lockAmount}
                 onChange={(event) => setLockAmount(event.target.value)}
                 placeholder="0.0"
-                className="w-full rounded-xl border border-border/40 bg-background/60 px-3 py-2 text-sm text-foreground focus:border-primary focus:outline-none"
+                className={lockAmountInputClass}
+                aria-invalid={showLockAmountError}
               />
+              {showLockAmountError ? (
+                <p className="text-xs text-rose-300">Enter an amount greater than zero.</p>
+              ) : null}
             </div>
             <div className="space-y-2">
               <label className="text-xs font-semibold uppercase text-muted-foreground">EVM recipient</label>
@@ -780,16 +844,20 @@ const BridgePage = () => {
                 value={lockRecipient}
                 onChange={(event) => setLockRecipient(event.target.value)}
                 placeholder="0x..."
-                className="w-full rounded-xl border border-border/40 bg-background/60 px-3 py-2 text-sm text-foreground focus:border-primary focus:outline-none"
+                className={lockRecipientInputClass}
+                aria-invalid={showLockRecipientError}
               />
+              {showLockRecipientError ? (
+                <p className="text-xs text-rose-300">Use a 0x-prefixed address with 40 hexadecimal characters.</p>
+              ) : null}
             </div>
-            <Button type="submit" disabled={lockSubmit.isSubmitting || !bridgeConfigured}>
+            <Button type="submit" disabled={lockSubmit.isSubmitting || !bridgeConfigured || !lockFormValid}>
               {lockSubmit.isSubmitting ? <Loader /> : "Lock"}
             </Button>
           </form>
 
           <form
-            className="flex flex-col gap-4 rounded-2xl border border-border/40 bg-card/60 p-5"
+            className="flex flex-col gap-4 overflow-hidden rounded-2xl border border-white/5 bg-white/[0.02] p-5 shadow-sm md:p-6"
             onSubmit={(event) => {
               event.preventDefault();
               void handleMintSubmit();
@@ -808,8 +876,12 @@ const BridgePage = () => {
                 value={mintAmount}
                 onChange={(event) => setMintAmount(event.target.value)}
                 placeholder="0.0"
-                className="w-full rounded-xl border border-border/40 bg-background/60 px-3 py-2 text-sm text-foreground focus:border-primary focus:outline-none"
+                className={mintAmountInputClass}
+                aria-invalid={showMintAmountError}
               />
+              {showMintAmountError ? (
+                <p className="text-xs text-rose-300">Enter an amount greater than zero.</p>
+              ) : null}
             </div>
             <div className="space-y-2">
               <label className="text-xs font-semibold uppercase text-muted-foreground">Target account (GA…)</label>
@@ -818,8 +890,12 @@ const BridgePage = () => {
                 value={mintTarget}
                 onChange={(event) => setMintTarget(event.target.value)}
                 placeholder="GA..."
-                className="w-full rounded-xl border border-border/40 bg-background/60 px-3 py-2 text-sm text-foreground focus:border-primary focus:outline-none"
+                className={mintTargetInputClass}
+                aria-invalid={showMintTargetError}
               />
+              {showMintTargetError ? (
+                <p className="text-xs text-rose-300">Enter a valid Stellar public key (starts with G, 56 chars).</p>
+              ) : null}
             </div>
             <div className="space-y-2">
               <label className="text-xs font-semibold uppercase text-muted-foreground">Lock proof CID</label>
@@ -828,8 +904,12 @@ const BridgePage = () => {
                 value={mintProofCid}
                 onChange={(event) => setMintProofCid(event.target.value)}
                 placeholder="bafy..."
-                className="w-full rounded-xl border border-border/40 bg-background/60 px-3 py-2 text-sm text-foreground focus:border-primary focus:outline-none"
+                className={mintProofInputClass}
+                aria-invalid={showMintProofError}
               />
+              {showMintProofError ? (
+                <p className="text-xs text-rose-300">Add the CID from the corresponding lock proof.</p>
+              ) : null}
             </div>
             {trustlineMissing ? (
               <div className="rounded-xl border border-amber-400/40 bg-amber-500/10 p-3 text-xs text-amber-100">
@@ -847,20 +927,27 @@ const BridgePage = () => {
                   </Button>
                 </div>
                 <p className="mt-2 text-[11px] text-amber-200">
-                  Add the SUSD asset (issuer {SUSD_PUBLIC_ISSUER}) to the target account before minting.
+                  Add trustline to {SUSD_PUBLIC_CODE}:{SUSD_PUBLIC_ISSUER} before minting.
                 </p>
               </div>
             ) : null}
             <Button
               type="submit"
-              disabled={mintSubmitting || !bridgeConfigured || trustlineEnabling || trustlineChecking}
+              disabled={
+                mintSubmitting ||
+                !bridgeConfigured ||
+                trustlineEnabling ||
+                trustlineChecking ||
+                !mintBaseValid ||
+                trustlineMissing
+              }
             >
               {mintSubmitting ? <Loader /> : "Mint"}
             </Button>
           </form>
 
           <form
-            className="flex flex-col gap-4 rounded-2xl border border-border/40 bg-card/60 p-5"
+            className="flex flex-col gap-4 overflow-hidden rounded-2xl border border-white/5 bg-white/[0.02] p-5 shadow-sm md:p-6"
             onSubmit={(event) => {
               event.preventDefault();
               void handleRedeemSubmit();
@@ -881,8 +968,12 @@ const BridgePage = () => {
                 value={redeemAmount}
                 onChange={(event) => setRedeemAmount(event.target.value)}
                 placeholder="0.0"
-                className="w-full rounded-xl border border-border/40 bg-background/60 px-3 py-2 text-sm text-foreground focus:border-primary focus:outline-none"
+                className={redeemAmountInputClass}
+                aria-invalid={showRedeemAmountError}
               />
+              {showRedeemAmountError ? (
+                <p className="text-xs text-rose-300">Enter an amount greater than zero.</p>
+              ) : null}
             </div>
             <div className="space-y-2">
               <label className="text-xs font-semibold uppercase text-muted-foreground">EVM recipient</label>
@@ -891,16 +982,20 @@ const BridgePage = () => {
                 value={redeemRecipient}
                 onChange={(event) => setRedeemRecipient(event.target.value)}
                 placeholder="0x..."
-                className="w-full rounded-xl border border-border/40 bg-background/60 px-3 py-2 text-sm text-foreground focus:border-primary focus:outline-none"
+                className={redeemRecipientInputClass}
+                aria-invalid={showRedeemRecipientError}
               />
+              {showRedeemRecipientError ? (
+                <p className="text-xs text-rose-300">Use a valid EVM address (0x followed by 40 hex characters).</p>
+              ) : null}
             </div>
-            <Button type="submit" disabled={redeemSubmit.isSubmitting || !bridgeConfigured}>
+            <Button type="submit" disabled={redeemSubmit.isSubmitting || !bridgeConfigured || !redeemFormValid}>
               {redeemSubmit.isSubmitting ? <Loader /> : "Redeem"}
             </Button>
           </form>
         </section>
 
-        <section className="mb-12 rounded-2xl border border-border/40 bg-card/60 p-5">
+        <section className="mb-12 overflow-hidden rounded-2xl border border-white/5 bg-white/[0.02] p-5 shadow-sm md:p-6">
           <div className="mb-4 flex flex-wrap items-center justify-between gap-4">
             <div>
               <h2 className="text-lg font-semibold text-foreground">Bridge activity</h2>
@@ -925,11 +1020,13 @@ const BridgePage = () => {
               ))}
             </div>
           </div>
-          {renderList()}
+          <div className="max-h-[28rem] overflow-auto pr-1">
+            {renderList()}
+          </div>
         </section>
 
         {debugEnabled ? (
-          <section className="rounded-2xl border border-dashed border-primary/40 bg-primary/5 p-5 text-xs text-muted-foreground">
+          <section className="overflow-hidden rounded-2xl border border-dashed border-primary/40 bg-primary/5 p-5 text-xs text-muted-foreground md:p-6">
             <div className="mb-3 flex items-center justify-between">
               <h3 className="text-sm font-semibold text-primary">Debug snapshot</h3>
               <Button

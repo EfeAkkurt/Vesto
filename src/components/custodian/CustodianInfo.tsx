@@ -1,4 +1,5 @@
-import { shortAddress, formatDateTime } from "@/src/lib/utils/format";
+import { formatDateTime } from "@/src/lib/utils/format";
+import { shortAddress } from "@/src/lib/utils/text";
 
 export type CustodianInfoProps = {
   name: string;

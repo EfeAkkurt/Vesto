@@ -6,7 +6,7 @@ import { motion, useReducedMotion } from "framer-motion";
 import type { HorizonPayment } from "@/src/hooks/horizon";
 import { CopyHash } from "@/src/components/ui/CopyHash";
 import { Skeleton } from "@/src/components/ui/Skeleton";
-import { formatCurrency, formatDateTime } from "@/src/lib/utils/format";
+import { formatDateTime, formatUSD, formatXLM } from "@/src/lib/utils/format";
 import { transitions, stagger, listItem } from "@/src/components/motion/presets";
 import { STELLAR_NET } from "@/src/utils/constants";
 
@@ -148,6 +148,13 @@ export const TransactionsTable = ({ payments, isLoading, error }: TransactionsTa
                 const status = deriveStatus(payment);
                 const assetLabel = payment.asset_type === "native" ? "XLM" : payment.asset_code ?? "Asset";
                 const amount = payment.amount ? Number.parseFloat(payment.amount) : undefined;
+                const amountDisplay = (() => {
+                  if (amount == null || !Number.isFinite(amount)) return "—";
+                  if (payment.asset_type === "native") {
+                    return `${formatXLM(amount)} XLM`;
+                  }
+                  return formatUSD(amount);
+                })();
                 return (
                   <motion.tr
                     key={payment.id}
@@ -163,11 +170,11 @@ export const TransactionsTable = ({ payments, isLoading, error }: TransactionsTa
                         <span className="ml-2 text-xs text-muted-foreground">{shortIssuer(payment.asset_issuer)}</span>
                       ) : null}
                     </td>
-                    <td className="py-3 pr-6 text-right font-semibold text-foreground/90">
-                      {amount != null ? formatCurrency(amount) : "—"}
+                    <td className="no-wrap py-3 pr-6 text-right font-semibold text-foreground/90">
+                      {amountDisplay}
                     </td>
                     <td className="py-3 pr-6">
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 no-wrap">
                         <CopyHash value={payment.transaction_hash} />
                         <Link
                           href={`https://stellar.expert/explorer/${explorerSegment}/tx/${payment.transaction_hash}`}

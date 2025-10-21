@@ -12,6 +12,7 @@ import {
   isBridgeEnvConfigured,
 } from "@/src/utils/constants";
 import type { BridgeLock, BridgeMint, BridgeRedeem, BridgeStats } from "@/src/lib/types/bridge";
+import { formatXLM } from "@/src/lib/utils/format";
 
 const DEFAULT_LIMIT = 200;
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -88,7 +89,7 @@ const AmountSchema = z
     if (!Number.isFinite(numeric)) {
       throw new Error("Invalid amount");
     }
-    return numeric.toFixed(7);
+    return formatXLM(numeric);
   });
 
 const BridgeLockMetadataSchema = z.object({
@@ -511,7 +512,7 @@ const computeStats = (locks: BridgeLock[], mints: BridgeMint[], redeems: BridgeR
       return Number.isFinite(parsed) ? acc + parsed : acc;
     }, 0);
 
-  const formatTotal = (value: number): string => value.toFixed(7);
+  const formatTotal = (value: number): string => formatXLM(value);
 
   const lockXlmTotal = sumAmounts(locks.filter((lock) => lock.asset === "XLM"));
   const mintSusdTotal = sumAmounts(mints);

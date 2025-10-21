@@ -5,6 +5,7 @@ import { debugObj } from "@/src/lib/logging/logger";
 import { hashCidMemoHex } from "@/src/lib/spv/hash";
 import { getSpvAccount } from "@/src/utils/constants";
 import type { ReserveProofPayload, SpvBalanceSummary } from "@/src/lib/types/spv";
+import { formatXLM } from "@/src/lib/utils/format";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -27,7 +28,6 @@ export type BuildReserveJsonArgs = {
   weekOverride?: number;
 };
 
-const formatXlm = (value: number): string => value.toFixed(7);
 const formatSusd = (value: number): string => value.toFixed(2);
 
 export const buildReserveJson = (args: BuildReserveJsonArgs): ReserveProofPayload => {
@@ -45,7 +45,7 @@ export const buildReserveJson = (args: BuildReserveJsonArgs): ReserveProofPayloa
     schema: "vesto.reserve@1",
     week,
     reserveUSD: reserveUsd,
-    spvBalanceXLM: formatXlm(args.balance.xlm),
+    spvBalanceXLM: formatXLM(args.balance.xlm),
     spvBalanceSUSD: formatSusd(args.balance.susd),
     asOf,
     lastTx: args.lastTx ?? "",

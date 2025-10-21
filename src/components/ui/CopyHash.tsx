@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { cn } from "@/src/utils/cn";
-import { shortHash } from "@/src/lib/utils/format";
+import { shortHash } from "@/src/lib/utils/text";
 import { useToast } from "@/src/components/ui/Toast";
 
 export type CopyHashProps = {
@@ -43,7 +43,7 @@ export const CopyHash = ({ value, short = true, className }: CopyHashProps) => {
       type="button"
       onClick={handleCopy}
       className={cn(
-        "group inline-flex items-center gap-2 rounded-full border border-border/60 bg-muted/20 px-3 py-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground transition hover:border-primary/60 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 focus-visible:ring-offset-2 focus-visible:ring-offset-background",
+        "group inline-flex items-center gap-2 rounded-full border border-border/60 bg-muted/20 px-3 py-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground transition hover:border-primary/60 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 focus-visible:ring-offset-2 focus-visible:ring-offset-background no-wrap",
         className,
       )}
       aria-label={`Copy hash ${value}`}

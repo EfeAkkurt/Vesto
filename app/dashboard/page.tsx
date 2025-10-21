@@ -26,7 +26,7 @@ import { CUSTODIAN_ACCOUNT, getSusdAssetOrNull } from "@/src/utils/constants";
 import { useSpvBalance, useSpvIncome, useSpvHolders } from "@/src/hooks/useSpv";
 import type { SpvIncome, SpvHolder } from "@/src/lib/types/spv";
 
-import { formatCurrency } from "@/src/lib/utils/format";
+import { formatUSD } from "@/src/lib/utils/format";
 
 const projectSchedule = (
   base: PayoutSchedule | undefined,
@@ -144,7 +144,7 @@ const DashboardPage = () => {
         variants={prefersReducedMotion ? undefined : stagger(0.06)}
         className="space-y-6"
       >
-        <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <section className="grid gap-5 md:gap-6 sm:grid-cols-2 xl:grid-cols-4">
           {metrics.map((metric) => (
             <KpiCard
               key={metric.key}
@@ -164,7 +164,7 @@ const DashboardPage = () => {
               key="spv-balance"
               title="SPV Balance (XLM)"
               description={susdAsset
-                ? `${susdAsset.code} ${formatCurrency(spvBalance.data.susd)}`
+                ? `${susdAsset.code} ${formatUSD(spvBalance.data.susd)}`
                 : "SUSD configuration missing"}
               value={spvBalance.data.xlm}
               precision={2}
@@ -177,7 +177,7 @@ const DashboardPage = () => {
             <Skeleton className="h-24 w-full" />
           ) : null}
         </section>
-        <section className="grid gap-6 xl:grid-cols-12">
+        <section className="grid gap-5 md:gap-6 xl:grid-cols-12">
           <div className="xl:col-span-6">
             <PortfolioBars data={holdingsData} isLoading={isAccountLoading} />
           </div>

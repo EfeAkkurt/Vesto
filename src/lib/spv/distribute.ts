@@ -1,4 +1,5 @@
 import type { SpvAssetCode, SpvDistributionSummary, SpvHolder, SpvPayout } from "@/src/lib/types/spv";
+import { formatXLM } from "@/src/lib/utils/format";
 
 const STROOPS_PER_UNIT = 10_000_000;
 const MIN_STROOPS = 1;
@@ -11,8 +12,7 @@ const normaliseAsset = (asset: SpvAssetCode): SpvAssetCode => (asset === "SUSD" 
 
 const toAmountString = (stroops: number): string => {
   const normalized = fromStroops(stroops);
-  const fixed = normalized.toFixed(7);
-  return fixed.replace(/0+$/u, "").replace(/\.$/u, "") || "0";
+  return formatXLM(normalized);
 };
 
 const sumBalances = (holders: SpvHolder[]): number =>

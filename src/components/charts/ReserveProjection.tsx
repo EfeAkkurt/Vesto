@@ -16,7 +16,7 @@ import {
 } from "recharts";
 import type { ReservePoint } from "@/src/lib/dashboard/types";
 import { ChartWrapper } from "@/src/components/charts/ChartWrapper";
-import { formatCurrency, formatDate } from "@/src/lib/utils/format";
+import { formatDate, formatUSD } from "@/src/lib/utils/format";
 
 const colors = {
   reserve: "var(--color-primary)",
@@ -49,8 +49,8 @@ const CustomTooltip = ({ active, payload, label }: TooltipProps<number, string>)
   return (
     <div className="rounded-lg border border-border/50 bg-background/80 px-3 py-2 text-xs text-foreground shadow-lg">
       <p className="font-semibold">{label}</p>
-      <p className="mt-1 text-muted-foreground">Reserve {formatCurrency(Number(reserve))}</p>
-      <p>Projected payout {formatCurrency(Number(projected))}</p>
+      <p className="mt-1 text-muted-foreground">Reserve {formatUSD(Number(reserve))}</p>
+      <p>Projected payout {formatUSD(Number(projected))}</p>
     </div>
   );
 };

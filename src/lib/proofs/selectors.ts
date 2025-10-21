@@ -6,7 +6,7 @@ import type { BridgeLock, BridgeMint, BridgeRedeem } from "@/src/lib/types/bridg
 import { BRIDGE_PUBLIC_ACCOUNT } from "@/src/utils/constants";
 import type { StoredProof } from "@/src/lib/proofs/storage";
 import { formatDate, formatDateTime, formatRelativeTime } from "@/src/lib/utils/format";
-import { shortHash } from "@/src/lib/utils/format";
+import { shortHash } from "@/src/lib/utils/text";
 import type { ReserveProofRecord } from "@/src/lib/spv/store";
 
 export type ProofListItem = {

@@ -34,15 +34,14 @@ import {
   isSpvSignerConfigured,
 } from "@/src/utils/constants";
 import {
-  formatCurrency,
   formatDate,
   formatDateTime,
   formatNumber,
-  formatPercent,
-  formatXlm,
-  shortAddress,
-  shortHash,
+  formatPct,
+  formatUSD,
+  formatXLM,
 } from "@/src/lib/utils/format";
+import { shortAddress, shortHash } from "@/src/lib/utils/text";
 
 const spvAccountId = getSpvAccount();
 const susdAsset = getSusdAssetOrNull();
@@ -118,7 +117,7 @@ const formatRelativeLabel = (iso?: string) => {
   return formatDateTime(iso);
 };
 
-const actionHeaders = "flex items-center justify-between rounded-2xl border border-border/40 bg-card/50 px-4 py-3";
+const actionHeaders = "flex items-center justify-between overflow-hidden rounded-2xl border border-white/5 bg-white/[0.02] px-5 py-4 shadow-sm md:px-6";
 
 const HolderTable = ({
   holders,
@@ -136,7 +135,7 @@ const HolderTable = ({
   const total = holders.reduce((sum, item) => sum + item.balance, 0);
 
   return (
-    <div className="overflow-hidden rounded-2xl border border-border/40 bg-card/60">
+    <div className="overflow-hidden rounded-2xl border border-white/5 bg-white/[0.02] shadow-sm">
       <table className="min-w-full divide-y divide-border/40 text-sm">
         <thead className="bg-border/10 text-xs uppercase tracking-wide text-muted-foreground">
           <tr>
@@ -152,7 +151,7 @@ const HolderTable = ({
               <tr key={holder.account} className="text-foreground/90">
                 <td className="px-4 py-3 font-mono text-xs">{shortAddress(holder.account)}</td>
                 <td className="px-4 py-3 text-right">{formatNumber(holder.balance, 2)}</td>
-                <td className="px-4 py-3 text-right text-primary">{formatPercent(share * 100, 2)}</td>
+                <td className="px-4 py-3 text-right text-primary">{formatPct(share, 2)}</td>
               </tr>
             );
           })}
@@ -179,19 +178,19 @@ const IncomeSummary = ({
 
   return (
     <div className="grid gap-4 sm:grid-cols-2">
-      <div className="rounded-2xl border border-border/40 bg-card/60 p-4">
+      <div className="overflow-hidden rounded-2xl border border-white/5 bg-white/[0.02] p-5 shadow-sm md:p-6">
         <p className="text-xs uppercase tracking-wide text-muted-foreground">XLM income</p>
         <p className="mt-2 text-2xl font-semibold text-primary">
-          {income.incomeXlm > 0 ? formatXlm(income.incomeXlm) : "0 XLM"}
+          {income.incomeXlm > 0 ? `${formatXLM(income.incomeXlm)} XLM` : "0 XLM"}
         </p>
         <p className="mt-1 text-xs text-muted-foreground">Window · {income.windowDays} days</p>
       </div>
-      <div className="rounded-2xl border border-border/40 bg-card/60 p-4">
+      <div className="overflow-hidden rounded-2xl border border-white/5 bg-white/[0.02] p-5 shadow-sm md:p-6">
         <p className="text-xs uppercase tracking-wide text-muted-foreground">
           {hasSusd ? `${susdAsset!.code} income` : "USD projection"}
         </p>
         <p className="mt-2 text-2xl font-semibold text-primary">
-          {hasSusd ? formatCurrency(income.incomeSusd) : formatCurrency(income.incomeXlm)}
+          {hasSusd ? formatUSD(income.incomeSusd) : formatUSD(income.incomeXlm)}
         </p>
         <p className="mt-1 text-xs text-muted-foreground">
           Ops counted · {income.opsCount} · Last tx {income.lastTxHash ? formatDateTime(income.fetchedAt) : "—"}
@@ -229,6 +228,8 @@ const SpvPage = () => {
   const [reservePreview, setReservePreview] = useState<ReserveProofPayload | null>(null);
   const [lastDistribution, setLastDistribution] = useState<DistributionReceipt | null>(null);
   const [lastReserve, setLastReserve] = useState<ReserveReceipt | null>(null);
+  const [distributionError, setDistributionError] = useState<{ message: string; asset: "XLM" | "SUSD" | null } | null>(null);
+  const [reserveError, setReserveError] = useState<string | null>(null);
 
   const holders = ensureHolders(holdersState.data);
   const eligible = useDistributionEligibility(wallet.accountId);
@@ -270,6 +271,7 @@ const SpvPage = () => {
       });
       return;
     }
+    setDistributionError(null);
     setDistributionBusy(asset);
     try {
       const response = await fetch("/api/spv/distribute", {
@@ -299,16 +301,19 @@ const SpvPage = () => {
         recordedAt: new Date().toISOString(),
       };
       setLastDistribution(receipt);
-      const totalLabel = asset === "XLM" ? formatXlm(receipt.totalPaid) : formatCurrency(receipt.totalPaid);
+      setDistributionError(null);
+      const totalLabel = asset === "XLM" ? `${formatXLM(receipt.totalPaid)} XLM` : formatUSD(receipt.totalPaid);
       toast({
         title: `${asset} distribution broadcast`,
         description: `Paid ${totalLabel} to ${receipt.opCount} holders — ${shortHash(receipt.hash, 6, 6)} on-chain.`,
       });
       await Promise.all([refreshDashboardAll(), refreshProofsAll(), refreshSpvAll()]);
     } catch (error) {
+      const message = error instanceof Error ? error.message : "Unexpected error while distributing.";
+      setDistributionError({ message, asset });
       toast({
         title: "Distribution failed",
-        description: error instanceof Error ? error.message : "Unexpected error while distributing.",
+        description: message,
         variant: "error",
       });
     } finally {
@@ -325,6 +330,7 @@ const SpvPage = () => {
       });
       return;
     }
+    setReserveError(null);
     setReserveBusy(true);
     try {
       const response = await fetch("/api/spv/reserve", {
@@ -348,6 +354,7 @@ const SpvPage = () => {
         recordedAt: new Date().toISOString(),
       };
       setLastReserve(receipt);
+      setReserveError(null);
       toast({
         title: "Reserve proof published",
         description: `CID ${shortHash(receipt.cid, 6, 6)} anchored · tx ${shortHash(receipt.hash, 6, 6)}.`,
@@ -356,9 +363,11 @@ const SpvPage = () => {
       setReserveNotes("");
       await Promise.all([refreshProofsAll(), refreshDashboardAll(), refreshSpvAll()]);
     } catch (error) {
+      const message = error instanceof Error ? error.message : "Unexpected error while publishing reserve proof.";
+      setReserveError(message);
       toast({
         title: "Publish failed",
-        description: error instanceof Error ? error.message : "Unexpected error while publishing reserve proof.",
+        description: message,
         variant: "error",
       });
     } finally {
@@ -532,11 +541,32 @@ const SpvPage = () => {
               on the server for automated signing.
             </p>
           ) : null}
+          {distributionError ? (
+            <div className="rounded-2xl border border-rose-500/40 bg-rose-500/10 p-4 text-xs text-rose-100">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <span>{distributionError.message}</span>
+                {distributionError.asset ? (
+                  <button
+                    type="button"
+                    disabled={distributionBusy !== null}
+                    className="text-rose-200 underline-offset-2 transition hover:text-rose-100 hover:underline disabled:cursor-not-allowed disabled:text-rose-300/70"
+                    onClick={() => {
+                      if (distributionBusy === null) {
+                        void handleDistribution(distributionError.asset!);
+                      }
+                    }}
+                  >
+                    Try again
+                  </button>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
           {lastDistribution ? (
             <div className="rounded-2xl border border-primary/40 bg-primary/10 p-4 text-xs">
               <p className="font-semibold text-primary">Last distribution · {formatDateTime(lastDistribution.recordedAt)}</p>
               <p className="mt-1 text-foreground/80">
-                Paid {lastDistribution.asset === "XLM" ? formatXlm(lastDistribution.totalPaid) : formatCurrency(lastDistribution.totalPaid)} to {lastDistribution.opCount} holders.
+                Paid {lastDistribution.asset === "XLM" ? `${formatXLM(lastDistribution.totalPaid)} XLM` : formatUSD(lastDistribution.totalPaid)} to {lastDistribution.opCount} holders.
               </p>
               <div className="mt-2 flex items-center gap-2 text-foreground/80">
                 <CopyHash value={lastDistribution.hash} />
@@ -572,6 +602,25 @@ const SpvPage = () => {
             className="w-full rounded-2xl border border-border/40 bg-card/40 px-4 py-3 text-sm text-foreground/90 focus:border-primary/40 focus:outline-none focus:ring-2 focus:ring-primary/40"
             rows={3}
           />
+          {reserveError ? (
+            <div className="rounded-2xl border border-rose-500/40 bg-rose-500/10 p-4 text-xs text-rose-100">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <span>{reserveError}</span>
+                <button
+                  type="button"
+                  disabled={reserveBusy}
+                  className="text-rose-200 underline-offset-2 transition hover:text-rose-100 hover:underline disabled:cursor-not-allowed disabled:text-rose-300/70"
+                  onClick={() => {
+                    if (!reserveBusy) {
+                      void publishReserve();
+                    }
+                  }}
+                >
+                  Try again
+                </button>
+              </div>
+            </div>
+          ) : null}
           {reservePreview ? (
             <pre className="overflow-auto rounded-2xl border border-border/60 bg-card/70 p-4 text-xs text-foreground/90">
               {JSON.stringify(reservePreview, null, 2)}

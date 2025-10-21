@@ -4,7 +4,7 @@ import { useMemo } from "react";
 import { motion, useReducedMotion } from "framer-motion";
 import { CopyHash } from "@/src/components/ui/CopyHash";
 import type { AssetType, ProofRef } from "@/src/lib/types/proofs";
-import { formatUSD } from "@/src/lib/utils/format";
+import { formatPct, formatUSD } from "@/src/lib/utils/format";
 
 export type LivePreviewCardProps = {
   name: string;
@@ -70,7 +70,7 @@ export const LivePreviewCard = ({
         <div>
           <p className="text-xs uppercase tracking-wide text-muted-foreground">Expected Yield</p>
           <p className="mt-1 text-lg font-semibold text-foreground">
-            {sanitizedYield !== null ? `${sanitizedYield.toFixed(2).replace(/\.00$/, "").replace(/(\.\d)0$/, "$1")} %` : "—"}
+            {sanitizedYield !== null ? formatPct(sanitizedYield / 100, sanitizedYield % 1 === 0 ? 0 : 2) : "—"}
           </p>
         </div>
         <div className="sm:col-span-2">

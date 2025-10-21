@@ -12,7 +12,7 @@ import { SpvStatus } from "@/src/components/proofs/SpvStatus";
 import { ReserveMiniChart } from "@/src/components/proofs/ReserveMiniChart";
 import { ProofRowActions } from "@/src/components/proofs/ProofRowActions";
 import { ProofsEmpty } from "@/src/components/proofs/ProofsEmpty";
-import { ProofsSkeleton } from "@/src/components/proofs/ProofsSkeleton";
+import { SkeletonRow } from "@/src/components/shared/SkeletonRow";
 import { useToast } from "@/src/components/ui/Toast";
 import { Loader } from "@/src/components/ui/Loader";
 import { CopyHash } from "@/src/components/ui/CopyHash";
@@ -715,20 +715,29 @@ const ProofsPage = () => {
 
               <div className="space-y-3">
                 {showSkeleton ? (
-                  <ProofsSkeleton />
+                  <div className="space-y-3">
+                    {Array.from({ length: 3 }).map((_, index) => (
+                      <div
+                        key={`proof-skeleton-${index}`}
+                        className="rounded-xl border border-border/40 bg-border/10 p-4"
+                      >
+                        <SkeletonRow lines={4} />
+                      </div>
+                    ))}
+                  </div>
                 ) : currentProofs.length === 0 ? (
                   <ProofsEmpty />
                 ) : (
                   currentProofs.map((proof) => (
                     <article
                       key={proof.id || proof.cid}
-                      className="flex flex-col gap-4 rounded-xl border border-border/60 bg-background/40 px-4 py-4 transition hover:border-primary/40"
+                      className="flex flex-col gap-4 overflow-hidden rounded-2xl border border-white/5 bg-white/[0.02] p-5 shadow-sm transition hover:border-primary/40 md:p-6"
                     >
                       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                         <div>
                           <div className="flex items-center gap-2">
-                            <h3 className="text-sm font-semibold text-foreground">{proof.title}</h3>
-                            <span className="rounded-full bg-border px-2 py-0.5 text-[11px] font-medium uppercase text-muted-foreground" title={proof.metadataCid}>
+                            <h3 className="text-sm font-semibold text-foreground no-wrap">{proof.title}</h3>
+                            <span className="no-wrap rounded-full bg-border px-2 py-0.5 text-[11px] font-medium uppercase text-muted-foreground" title={proof.metadataCid}>
                               CID {proof.cid.slice(0, 8)}…
                             </span>
                           </div>
@@ -737,7 +746,7 @@ const ProofsPage = () => {
                           </p>
                         </div>
                         <span
-                          className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold ${STATUS_PILL_CLASS[proof.status]}`}
+                          className={`no-wrap inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold ${STATUS_PILL_CLASS[proof.status]}`}
                         >
                           {statusLabel(proof.status)}
                         </span>

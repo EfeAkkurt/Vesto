@@ -1,36 +1,63 @@
-export type FormatUSDOptions = {
-  compact?: boolean;
-  minimumFractionDigits?: number;
-  maximumFractionDigits?: number;
+const parseNumeric = (value: number | string): number => {
+  if (typeof value === "number") return value;
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) return Number.NaN;
+    const normalized = trimmed.replace(/,/g, "");
+    return Number.parseFloat(normalized);
+  }
+  return Number.NaN;
 };
 
-const defaultUsdOptions: Required<Omit<FormatUSDOptions, "compact">> = {
+const USD_FORMATTER = new Intl.NumberFormat("en-US", {
+  style: "currency",
+  currency: "USD",
   minimumFractionDigits: 2,
   maximumFractionDigits: 2,
-};
+});
 
-const compactUsdFormatter = new Intl.NumberFormat("en-US", {
+const USD_COMPACT_FORMATTER = new Intl.NumberFormat("en-US", {
   style: "currency",
   currency: "USD",
   notation: "compact",
-  minimumFractionDigits: 1,
   maximumFractionDigits: 1,
 });
 
-export const formatUSD = (value: number, options: FormatUSDOptions = {}): string => {
-  if (Number.isNaN(value)) return "$0.00";
-  if (options.compact) {
-    return compactUsdFormatter.format(value);
-  }
+export const formatUSD = (value: number | string): string => {
+  const numeric = parseNumeric(value);
+  if (!Number.isFinite(numeric)) return "$0.00";
+  return USD_FORMATTER.format(numeric);
+};
 
+export const formatUSDCompact = (value: number | string): string => {
+  const numeric = parseNumeric(value);
+  if (!Number.isFinite(numeric)) return "$0";
+  return USD_COMPACT_FORMATTER.format(numeric);
+};
+
+const trimTrailingZeros = (value: string): string => {
+  if (!value.includes(".")) return value;
+  return value.replace(/(\.\d*?[1-9])0+$|\.0+$/u, "$1").replace(/\.$/, "");
+};
+
+export const formatXLM = (value: number | string): string => {
+  const numeric = parseNumeric(value);
+  if (!Number.isFinite(numeric)) return "0";
+  const fixed = numeric.toFixed(7);
+  const trimmed = trimTrailingZeros(fixed);
+  return trimmed.length > 0 ? trimmed : "0";
+};
+
+export const formatPct = (value: number | string, fractionDigits = 0): string => {
+  const numeric = parseNumeric(value);
+  if (!Number.isFinite(numeric)) return "0%";
+  const clamped = Math.max(0, Math.min(1, numeric));
   const formatter = new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-    minimumFractionDigits: options.minimumFractionDigits ?? defaultUsdOptions.minimumFractionDigits,
-    maximumFractionDigits: options.maximumFractionDigits ?? defaultUsdOptions.maximumFractionDigits,
+    style: "percent",
+    minimumFractionDigits: fractionDigits,
+    maximumFractionDigits: fractionDigits,
   });
-
-  return formatter.format(value);
+  return formatter.format(clamped);
 };
 
 export const formatNumber = (value: number, precision = 0): string => {
@@ -39,11 +66,6 @@ export const formatNumber = (value: number, precision = 0): string => {
     minimumFractionDigits: precision,
     maximumFractionDigits: precision,
   }).format(value);
-};
-
-export const formatPercent = (value: number, precision = 1): string => {
-  if (Number.isNaN(value)) return "0%";
-  return `${value.toFixed(precision)}%`;
 };
 
 export const formatDate = (iso: string): string => {
@@ -65,16 +87,6 @@ export const formatDateTime = (iso: string): string => {
   }).format(new Date(iso));
 };
 
-const ellipsize = (value: string, head = 6, tail = 4): string => {
-  if (!value) return "";
-  if (value.length <= head + tail) return value;
-  return `${value.slice(0, head)}…${value.slice(-tail)}`;
-};
-
-export const shortHash = (hash: string, head = 6, tail = 4) => ellipsize(hash, head, tail);
-
-export const shortAddress = (address: string, head = 6, tail = 4) => ellipsize(address, head, tail);
-
 export const formatBytes = (bytes?: number): string => {
   if (!bytes || Number.isNaN(bytes)) return "—";
   if (bytes < 1024) return `${bytes} B`;
@@ -93,29 +105,7 @@ export const formatDirection = (from: string, to: string): string => `${from} �
 export const pluralize = (value: number, unit: string): string =>
   `${value} ${value === 1 ? unit : `${unit}s`}`;
 
-export const formatCurrency = (value: number, options?: FormatUSDOptions) => formatUSD(value, options);
-
-export const formatXlm = (value: number | string): string => {
-  const numeric =
-    typeof value === "string"
-      ? Number.parseFloat(value)
-      : value;
-
-  if (!Number.isFinite(numeric) || numeric === 0) {
-    return "0 XLM";
-  }
-
-  if (numeric > 0 && numeric < 0.000001) {
-    return "≤ 0.000001 XLM";
-  }
-
-  const formatted = new Intl.NumberFormat("en-US", {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 6,
-  }).format(numeric);
-
-  return `${formatted} XLM`;
-};
+export const formatCurrency = (value: number | string) => formatUSD(value);
 
 export const maskPercent = (value: string): string => {
   if (value === undefined || value === null) return "";

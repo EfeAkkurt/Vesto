@@ -2,9 +2,10 @@
 
 import { motion, useReducedMotion } from "framer-motion";
 import { CopyHash } from "@/src/components/ui/CopyHash";
+import { EmptyState } from "@/src/components/shared/EmptyState";
 import type { Attestation } from "@/src/lib/types/proofs";
 import { MANAGE_DATA_SIGNATURE } from "@/src/lib/types/proofs";
-import { formatUSD, formatDate } from "@/src/lib/utils/format";
+import { formatUSD, formatDate, formatXLM } from "@/src/lib/utils/format";
 
 export type AttestationTimelineProps = {
   items: Attestation[];
@@ -37,14 +38,16 @@ export const AttestationTimeline = ({ items, onOpen }: AttestationTimelineProps)
 
   if (items.length === 0) {
     return (
-      <div className="rounded-2xl border border-border/60 bg-card/60 p-6 text-center text-sm text-muted-foreground">
-        No attestations yet. Upload the first proof to kick off the timeline.
-      </div>
+      <EmptyState
+        title="No attestations yet"
+        hint="Upload the first proof to kick off the timeline."
+        className="w-full"
+      />
     );
   }
 
   return (
-    <div className="relative rounded-2xl border border-border/60 bg-card/60 p-6">
+    <div className="relative overflow-hidden rounded-2xl border border-white/5 bg-white/[0.02] p-5 shadow-sm md:p-6">
       <div className="absolute left-6 top-10 bottom-6 hidden w-px bg-border/60 md:block" aria-hidden />
       <motion.ul
         initial={prefersReducedMotion ? undefined : "hidden"}
@@ -56,11 +59,15 @@ export const AttestationTimeline = ({ items, onOpen }: AttestationTimelineProps)
           const key = item.metadataCid || item.txHash || `${item.week}-${index}`;
           const hasSignature = Boolean(item.signature && item.signature !== MANAGE_DATA_SIGNATURE);
           const styles = statusStyles[item.status];
+          const hasReserve = item.status === "Verified" || (item.reserveUSD ?? 0) > 0;
+          const heading = hasReserve
+            ? `Week ${item.week} — Reserve ${formatUSD(item.reserveUSD)}`
+            : `Week ${item.week}`;
           return (
             <motion.li
               key={key}
               variants={prefersReducedMotion ? undefined : itemVariants}
-              className="relative grid gap-3 rounded-xl border border-border/50 bg-background/40 p-4 md:grid-cols-[auto,1fr,auto] md:items-start"
+              className="relative grid gap-3 overflow-hidden rounded-2xl border border-white/5 bg-white/[0.02] p-5 shadow-sm md:grid-cols-[auto,1fr,auto] md:items-start md:p-6"
             >
               <div className="hidden md:flex">
                 <span className={`relative mt-1 h-3 w-3 shrink-0 rounded-full border border-border/40 ${styles.dot}`}>
@@ -69,21 +76,21 @@ export const AttestationTimeline = ({ items, onOpen }: AttestationTimelineProps)
               </div>
               <div className="space-y-2">
                 <div className="flex flex-wrap items-center gap-2">
-                  <p className="text-sm font-semibold text-foreground">
-                    Week {item.week} — Reserve {formatUSD(item.reserveUSD)}
+                  <p className="no-wrap text-sm font-semibold text-foreground">
+                    {heading}
                   </p>
                   <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${styles.badge}`}>{item.status}</span>
                 </div>
-                <p className="text-xs text-muted-foreground">Signed on {formatDate(item.ts)}</p>
+                <p className="no-wrap text-xs text-muted-foreground">Signed on {formatDate(item.ts)}</p>
                 {item.signedBy || item.txSourceAccount || item.sigCount != null || item.signatureCount != null ? (
-                  <p className="text-xs text-muted-foreground">
+                  <p className="no-wrap text-xs text-muted-foreground">
                     Signed by {(item.txSourceAccount ?? item.signedBy) || "—"} •{" "}
                     {(item.sigCount ?? item.signatureCount ?? 0).toString()} sig
                   </p>
                 ) : null}
                 {typeof item.feeXlm === "number" ? (
-                  <p className="text-xs text-muted-foreground">
-                    Fee: {item.feeXlm.toFixed(7)} XLM
+                  <p className="no-wrap text-xs text-muted-foreground">
+                    Fee: {formatXLM(item.feeXlm)} XLM
                   </p>
                 ) : null}
                 <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">

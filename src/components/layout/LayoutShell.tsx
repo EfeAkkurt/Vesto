@@ -52,7 +52,7 @@ export const LayoutShell: FC<LayoutShellProps> = ({ children, wallet, networkHea
           onToggleCollapse={toggleSidebarCollapse}
           isSidebarCollapsed={sidebarCollapsed}
         />
-        <main id="main-content" className="relative z-10 w-full px-4 pb-10 pt-6 sm:px-6 lg:px-8">
+        <main id="main-content" className="relative z-10 w-full p-5 md:p-6 lg:p-8">
           <div className="mx-auto w-full max-w-[1360px]">{children}</div>
         </main>
       </div>

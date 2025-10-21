@@ -13,7 +13,7 @@ import {
   SUSD_PUBLIC_CODE,
   SUSD_PUBLIC_ISSUER,
 } from "@/src/utils/constants";
-import { parseAmountToStroops } from "@/src/lib/utils/format";
+import { formatXLM, parseAmountToStroops } from "@/src/lib/utils/format";
 import { debugObj } from "@/src/lib/logging/logger";
 import { SUSD } from "@/src/lib/bridge/asset";
 import { hasSusdTrustline } from "./trust";
@@ -47,7 +47,7 @@ const normaliseAmount = (value: string | number): string => {
   if (!Number.isFinite(stroops) || stroops <= 0) {
     throw new BridgeError("validation_error", "Amount must be greater than zero.", 400);
   }
-  return (stroops / 10_000_000).toFixed(7);
+  return formatXLM(stroops / 10_000_000);
 };
 
 const validateAsset = (asset: string): "XLM" | "SUSD" => {
