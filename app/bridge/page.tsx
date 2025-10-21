@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { LayoutShell } from "@/src/components/layout/LayoutShell";
 import { useWallet } from "@/src/hooks/useWallet";
@@ -37,6 +37,7 @@ import {
   isBridgeEnvConfigured,
   getBridgeEnvDiagnostics,
 } from "@/src/utils/constants";
+import { enableSusdTrustline } from "@/src/lib/bridge/changeTrust.client";
 
 type TabKey = "locks" | "mints" | "redeems";
 
@@ -219,12 +220,19 @@ const BridgePage = () => {
   const [mintAmount, setMintAmount] = useState("");
   const [mintTarget, setMintTarget] = useState("");
   const [mintProofCid, setMintProofCid] = useState("");
+  const [trustlineMissing, setTrustlineMissing] = useState(false);
+  const [trustlineChecking, setTrustlineChecking] = useState(false);
+  const [trustlineEnabling, setTrustlineEnabling] = useState(false);
 
   const [redeemAmount, setRedeemAmount] = useState("");
   const [redeemRecipient, setRedeemRecipient] = useState("");
 
+  useEffect(() => {
+    setTrustlineMissing(false);
+  }, [mintTarget]);
+
   const lockSubmit = useSubmittingState();
-  const mintSubmit = useSubmittingState();
+  const { wrap: wrapMintSubmit, isSubmitting: mintSubmitting } = useSubmittingState();
   const redeemSubmit = useSubmittingState();
 
   const {
@@ -257,6 +265,42 @@ const BridgePage = () => {
   }, [activeTab, locks, mints, redeems]);
 
   const statsData = stats ?? defaultStats;
+
+  const checkSusdTrustline = useCallback(
+    async (accountId: string) => {
+      const target = accountId.trim();
+      if (!target) return false;
+      setTrustlineChecking(true);
+      try {
+        const response = await fetch("/api/bridge/trustline", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ accountId: target }),
+        });
+        if (!response.ok) {
+          throw new Error("Trustline check failed.");
+        }
+        const json = (await response.json()) as { hasTrustline?: boolean };
+        const hasTrustline = Boolean(json.hasTrustline);
+        if (debugEnabled) {
+          console.debug("[bridge:trustline]", { accountId: target, hasTrustline });
+        }
+        setTrustlineMissing(!hasTrustline);
+        return hasTrustline;
+      } catch (error) {
+        console.error("[bridge:trustline:check]", error);
+        toast({
+          title: "Trustline check failed",
+          description: "Unable to verify SUSD trustline. Please retry.",
+          variant: "error",
+        });
+        return false;
+      } finally {
+        setTrustlineChecking(false);
+      }
+    },
+    [toast],
+  );
 
   const handleLockSubmit = () =>
     lockSubmit.wrap(async () => {
@@ -330,8 +374,8 @@ const BridgePage = () => {
       }
     });
 
-  const handleMintSubmit = () =>
-    mintSubmit.wrap(async () => {
+  const handleMintSubmit = useCallback(() => {
+    return wrapMintSubmit(async () => {
       if (!bridgeConfigured) {
         toast({
           title: "Bridge not configured",
@@ -364,6 +408,16 @@ const BridgePage = () => {
         });
         return;
       }
+      const trustlineOk = await checkSusdTrustline(mintTarget);
+      if (!trustlineOk) {
+        toast({
+          title: "SUSD trustline required",
+          description: "Enable the SUSD asset before minting.",
+          variant: "warning",
+        });
+        return;
+      }
+      setTrustlineMissing(false);
       try {
         const response = await fetch("/api/bridge/mint", {
           method: "POST",
@@ -380,9 +434,22 @@ const BridgePage = () => {
           | { error: { code?: string; message?: string; hint?: string } };
         if (!response.ok || "error" in json) {
           const err = "error" in json ? json.error : undefined;
+          const hint = err?.hint ?? "";
+          const message = err?.message ?? "";
+          const trustlineError =
+            hint.includes("op_no_trust") || message.includes("op_no_trust") || hint.includes("trustline_missing");
+          if (trustlineError) {
+            setTrustlineMissing(true);
+            toast({
+              title: "Trustline missing",
+              description: `Target account must enable trustline to SUSD (issuer ${SUSD_PUBLIC_ISSUER}). Click “Enable SUSD”.`,
+              variant: "error",
+            });
+            return;
+          }
           toast({
             title: "Mint failed",
-            description: err?.hint ?? err?.message ?? "Unable to submit mint transaction.",
+            description: hint || message || "Unable to submit mint transaction.",
             variant: "error",
           });
           return;
@@ -392,6 +459,7 @@ const BridgePage = () => {
           description: `Tx ${shortHash(json.hash, 6, 6)} recorded.`,
           variant: "success",
         });
+        setTrustlineMissing(false);
         setMintAmount("");
         setMintTarget("");
         setMintProofCid("");
@@ -407,6 +475,54 @@ const BridgePage = () => {
         });
       }
     });
+  }, [
+    bridgeConfigured,
+    checkSusdTrustline,
+    mintAmount,
+    mintProofCid,
+    mintTarget,
+    toast,
+    wrapMintSubmit,
+  ]);
+
+  const handleEnableTrustline = useCallback(async () => {
+    const target = mintTarget.trim();
+    if (!target) {
+      toast({
+        title: "Target required",
+        description: "Enter the Stellar account before enabling SUSD.",
+        variant: "warning",
+      });
+      return;
+    }
+    if (trustlineEnabling) return;
+    setTrustlineEnabling(true);
+    try {
+      await enableSusdTrustline({ accountId: target });
+      toast({
+        title: "Trustline enabled",
+        description: "SUSD trustline created successfully.",
+        variant: "success",
+      });
+      const verified = await checkSusdTrustline(target);
+      if (verified) {
+        setTrustlineMissing(false);
+        // retry mint automatically with current form values
+        setTimeout(() => {
+          void handleMintSubmit();
+        }, 0);
+      }
+    } catch (error) {
+      console.error("[bridge:trustline:enable]", error);
+      toast({
+        title: "Enable failed",
+        description: error instanceof Error ? error.message : "Unable to submit change trust transaction.",
+        variant: "error",
+      });
+    } finally {
+      setTrustlineEnabling(false);
+    }
+  }, [mintTarget, trustlineEnabling, checkSusdTrustline, toast, handleMintSubmit]);
 
   const handleRedeemSubmit = () =>
     redeemSubmit.wrap(async () => {
@@ -715,8 +831,31 @@ const BridgePage = () => {
                 className="w-full rounded-xl border border-border/40 bg-background/60 px-3 py-2 text-sm text-foreground focus:border-primary focus:outline-none"
               />
             </div>
-            <Button type="submit" disabled={mintSubmit.isSubmitting || !bridgeConfigured}>
-              {mintSubmit.isSubmitting ? <Loader /> : "Mint"}
+            {trustlineMissing ? (
+              <div className="rounded-xl border border-amber-400/40 bg-amber-500/10 p-3 text-xs text-amber-100">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <p className="font-semibold text-amber-100">SUSD trustline required</p>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    disabled={trustlineEnabling || trustlineChecking}
+                    onClick={() => {
+                      void handleEnableTrustline();
+                    }}
+                  >
+                    {trustlineEnabling ? <Loader /> : "Enable SUSD"}
+                  </Button>
+                </div>
+                <p className="mt-2 text-[11px] text-amber-200">
+                  Add the SUSD asset (issuer {SUSD_PUBLIC_ISSUER}) to the target account before minting.
+                </p>
+              </div>
+            ) : null}
+            <Button
+              type="submit"
+              disabled={mintSubmitting || !bridgeConfigured || trustlineEnabling || trustlineChecking}
+            >
+              {mintSubmitting ? <Loader /> : "Mint"}
             </Button>
           </form>
 

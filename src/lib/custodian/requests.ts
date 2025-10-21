@@ -6,13 +6,27 @@ import { parseAmountToStroops } from "@/src/lib/utils/format";
 import { memoHashB64ToHex } from "@/src/lib/horizon/memos";
 import { CID } from "multiformats/cid";
 
+const numberish = z.union([z.number(), z.string()]).transform((value) => {
+  if (typeof value === "number") return value;
+  const cleaned = value.trim();
+  if (!cleaned) {
+    throw new Error("Invalid number");
+  }
+  const normalised = cleaned.replace(/[^\d.-]/g, "");
+  const parsed = Number.parseFloat(normalised);
+  if (!Number.isFinite(parsed)) {
+    throw new Error("Invalid number");
+  }
+  return parsed;
+});
+
 export const TokenRequestMetadataSchema = z.object({
   schema: z.string().min(1),
   asset: z.object({
     type: z.string().min(1),
     name: z.string().min(1),
-    valueUSD: z.coerce.number().nonnegative(),
-    expectedYieldPct: z.coerce.number().optional(),
+    valueUSD: numberish.pipe(z.number().nonnegative()),
+    expectedYieldPct: numberish.pipe(z.number().nonnegative()).optional(),
   }),
   proofCid: z.string().min(1),
   proofUrl: z.string().optional(),

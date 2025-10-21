@@ -23,32 +23,6 @@ export type VerifyAttestationResult = {
 };
 
 const metadataCache = new Map<string, Promise<AttestationMetadata>>();
-const headStatusCache = new Map<string, Promise<number>>();
-
-const fetchHeadStatus = async (cid: string): Promise<number> => {
-  if (!headStatusCache.has(cid)) {
-    const promise = (async () => {
-      try {
-        const url = getViaGateway(cid);
-        const response = await fetch(url, { method: "HEAD" });
-        return response.status;
-      } catch {
-        return 0;
-      }
-    })();
-    promise
-      .then((status) => {
-        if (status === 0 || status >= 400) {
-          headStatusCache.delete(cid);
-        }
-      })
-      .catch(() => {
-        headStatusCache.delete(cid);
-      });
-    headStatusCache.set(cid, promise);
-  }
-  return headStatusCache.get(cid)!;
-};
 
 const decodeBytes = (bytes: Uint8Array): unknown => {
   try {
@@ -125,14 +99,6 @@ export const verifyAttestation = async (
   context: VerifyAttestationContext,
   options: VerifyAttestationOptions = {},
 ): Promise<VerifyAttestationResult> => {
-  const status = await fetchHeadStatus(context.metadataCid).catch(() => 0);
-  if (status === 0) {
-    return { status: "Recorded", reason: "fetchError" };
-  }
-  if (status >= 400) {
-    return { status: "Recorded", reason: `fetch:${status}` };
-  }
-
   try {
     const metadata = await fetchMetadata(context.metadataCid);
     // Hackathon override: treat any successfully fetched metadata as Verified.
@@ -145,9 +111,10 @@ export const verifyAttestation = async (
     }
     return { status: "Verified", metadata };
   } catch (error) {
+    const message = error instanceof Error ? error.message : "metadata-error";
     return {
       status: "Recorded",
-      reason: error instanceof Error ? error.message : "metadata-error",
+      reason: message,
     };
   }
 };

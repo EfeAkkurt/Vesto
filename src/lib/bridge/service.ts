@@ -15,6 +15,8 @@ import {
 } from "@/src/utils/constants";
 import { parseAmountToStroops } from "@/src/lib/utils/format";
 import { debugObj } from "@/src/lib/logging/logger";
+import { SUSD } from "@/src/lib/bridge/asset";
+import { hasSusdTrustline } from "./trust";
 
 type HorizonSubmitResult = { hash?: string };
 
@@ -84,15 +86,8 @@ const validateCid = (cid: string, field: string): string => {
 
 const sha256Hex = (value: string): string => createHash("sha256").update(value).digest("hex");
 
-const getSusdAsset = () => {
-  if (!SUSD_PUBLIC_CODE || !SUSD_PUBLIC_ISSUER) {
-    throw new BridgeError("config_missing", "SUSD asset configuration missing.", 500);
-  }
-  return new Asset(SUSD_PUBLIC_CODE, SUSD_PUBLIC_ISSUER);
-};
-
 const resolvePaymentAsset = (asset: "XLM" | "SUSD"): Asset =>
-  asset === "XLM" ? Asset.native() : getSusdAsset();
+  asset === "XLM" ? Asset.native() : SUSD();
 
 const buildBaseTx = async () => {
   const server = getServer() as unknown as {
@@ -243,13 +238,21 @@ export const processMint = async ({ amount, targetAccount, evmLockProofCid }: Mi
   const normalisedTarget = validateStellarAccount(targetAccount);
   const proofCid = validateCid(evmLockProofCid, "evmLockProofCid");
   const timestamp = new Date().toISOString();
+  if (!(await hasSusdTrustline(normalisedTarget))) {
+    throw new BridgeError(
+      "trustline_missing",
+      "Target account must enable trustline to SUSD.",
+      400,
+      "op_no_trust",
+    );
+  }
 
   const metadata = {
     schema: "vesto.mint@1",
     bridgeAccount: BRIDGE_PUBLIC_ACCOUNT,
     targetAccount: normalisedTarget,
     amount: normalisedAmount,
-    asset: { code: "SUSD", issuer: SUSD_PUBLIC_ISSUER },
+    asset: { code: SUSD_PUBLIC_CODE ?? "SUSD", issuer: SUSD_PUBLIC_ISSUER },
     evmLockProofCid: proofCid,
     timestamp,
   };
@@ -284,7 +287,7 @@ export const processRedeem = async ({ amount, evmRecipient }: RedeemParams): Pro
     targetChain: "EVM",
     recipient,
     amount: normalisedAmount,
-    asset: { code: "SUSD", issuer: SUSD_PUBLIC_ISSUER },
+    asset: { code: SUSD_PUBLIC_CODE ?? "SUSD", issuer: SUSD_PUBLIC_ISSUER },
     timestamp,
   };
 

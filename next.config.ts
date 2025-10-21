@@ -22,6 +22,7 @@ const nextConfig: NextConfig = {
       [fetchEntryPath]: fetchBrowserPath,
       "ipfs-utils/src/http/fetch.node": fetchBrowserPath,
       "ipfs-utils/src/http/fetch.node.js": fetchBrowserPath,
+      "@stellar/stellar-sdk": require.resolve("./src/shims/stellar-sdk.ts"),
       "sodium-native": emptyModule,
       "sodium-native$": false,
       "require-addon": emptyModule,

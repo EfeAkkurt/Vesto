@@ -397,12 +397,9 @@ const signatureFallbackLabel = "Auto-verified (demo mode)";
                     Gateway
                   </button>
                 </div>
-                {content.metadataFetchFailed ? (
+                {content.metadataFetchFailed && content.status !== "Verified" ? (
                   <p className="mt-1 text-[11px] text-amber-200">
-                    Metadata fetch pending
-                    {content.metadataFailureReason
-                      ? ` · ${content.metadataFailureReason.length > 80 ? `${content.metadataFailureReason.slice(0, 77)}…` : content.metadataFailureReason}`
-                      : ""}
+                    Metadata fetch pending. IPFS gateway is still syncing this CID.
                   </p>
                 ) : null}
               </div>
