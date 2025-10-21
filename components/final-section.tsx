@@ -22,7 +22,7 @@ export function SectionContainer({
         backgroundRepeat: "no-repeat"
       }}
       className={`box-border w-full h-[540px] flex flex-col justify-center items-center
-      shadow-[0_4px_33px_0_rgba(0,0,0,0.05)] max-w-[1719px]
+      shadow-[0_4px_33px_0_rgba(0,0,0,0.05)] max-w-[1986px]
       overflow-visible content-center flex-nowrap gap-[10px] relative
       rounded-[33px] border border-[#1a1822] bg-black ${className}`}
     >
@@ -46,8 +46,11 @@ export function FinalSection() {
       <div className="relative mx-auto px-6">
         <SectionContainer>
           <div className="text-center">
-            <h1 className="text-6xl font-bold text-white mb-4">TEST GÖRÜNÜYOR MU?</h1>
-            <p className="text-2xl text-gray-300">Arka planda imagefooter.png olmalı</p>
+            <h1 className="text-6xl font-bold text-white mb-4">Launch Regulated Assets On Stellar</h1>
+            <p className="text-2xl text-gray-300">
+              <span className="block">Secure issuance with live custody attestations.</span>
+              <span className="block">Transparent settlement, orchestrated end-to-end.</span>
+            </p>
           </div>
         </SectionContainer>
       </div>

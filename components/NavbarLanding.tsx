@@ -8,10 +8,11 @@ import { motion } from "framer-motion";
 
 const NAV_LINKS = [
   { label: "Dashboard", href: "/dashboard" },
-  { label: "Proofs", href: "/proofs" },
-  { label: "Bridge", href: "/bridge" },
-  { label: "Custodian", href: "/custodian" },
   { label: "Tokenize", href: "/tokenize" },
+  { label: "Custodian", href: "/custodian" },
+  { label: "Proofs", href: "/proofs" },
+  { label: "SPV", href: "/spv" },
+  { label: "Bridge", href: "/bridge" },
 ] as const;
 
 function Logo() {
