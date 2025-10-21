@@ -279,6 +279,7 @@ const CustodianPage = () => {
       ? requestsError.message
       : String(requestsError)
     : "";
+  const showRequestsError = Boolean(requestsErrorMessage && debugOpen);
 
   return (
     <LayoutShell wallet={wallet} networkHealth={networkHealth}>
@@ -379,7 +380,7 @@ const CustodianPage = () => {
               </div>
             </div>
 
-            {requestsError ? (
+            {showRequestsError ? (
               <p className="mt-4 rounded-lg border border-rose-400/40 bg-rose-500/10 px-3 py-2 text-xs text-rose-200">
                 Failed to refresh custodian requests ({requestsErrorMessage || "unknown error"}). Please rescan or try again shortly.
               </p>

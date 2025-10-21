@@ -1,6 +1,12 @@
 "use client";
 
-import freighterApi, {
+import { getFreighterApi } from "@/src/lib/stellar/sdk.client";
+import { logger } from "@/lib/logging/logger";
+
+const freighter = getFreighterApi();
+
+const {
+  default: freighterApi,
   addToken,
   getAddress,
   getNetworkDetails,
@@ -11,8 +17,7 @@ import freighterApi, {
   signAuthEntry,
   signMessage,
   signTransaction,
-} from "@stellar/freighter-api";
-import { logger } from "@/lib/logging/logger";
+} = freighter;
 
 export type FreighterNetwork =
   | "PUBLIC"

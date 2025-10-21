@@ -1,3 +1,8 @@
+## Agent Log
+
+- 2025-10-21: Codex (GPT-5) resuming Phase 4 sprint; reviewed docs/todo and starting SDK split + custodian/IPFS fixes per hackathon brief.
+- 2025-10-21: Codex (GPT-5) taking over hackathon Phase 4 tasks; reviewing docs, syncing SPV distribution/reserve pipeline before dashboard/proofs wiring.
+
 # Repository Guidelines
 
 This document is the canonical instruction set for every engineer (human or agent) touching this repository. Review it fully before beginning work and refer back to it whenever making decisions about structure, tooling, or delivery workflow.

@@ -14,20 +14,30 @@ let cachedModule: StellarModule | null = null;
 
 export async function loadSDK(): Promise<StellarModule> {
   if (cachedModule) return cachedModule;
-  const sdk = (await import("stellar-sdk/minimal")) as Record<string, unknown>;
-  const horizon = (sdk["Horizon"] ?? {}) as Record<string, unknown>;
-  const server = (sdk["Server"] ?? horizon?.["Server"]) as unknown;
-  if (!server) {
-    throw new Error("Stellar SDK Server constructor unavailable");
-  }
+  const sdkModule = (await import("stellar-sdk")) as Record<string, unknown>;
+  const candidates = [
+    sdkModule,
+    sdkModule?.default as Record<string, unknown> | undefined,
+    (sdkModule as { StellarSdk?: Record<string, unknown> }).StellarSdk,
+  ].filter((candidate): candidate is Record<string, unknown> => Boolean(candidate));
+
+  const resolve = <T = unknown>(key: string): T | undefined => {
+    for (const candidate of candidates) {
+      const value = candidate?.[key] as T | undefined;
+      if (value !== undefined) return value;
+    }
+    return undefined;
+  };
+
+  const server = resolve("Server");
   cachedModule = {
     Server: server,
-    Keypair: sdk["Keypair"],
-    TransactionBuilder: sdk["TransactionBuilder"],
-    Networks: sdk["Networks"],
-    Operation: sdk["Operation"],
-    Memo: sdk["Memo"],
-    Asset: sdk["Asset"],
+    Keypair: resolve("Keypair"),
+    TransactionBuilder: resolve("TransactionBuilder"),
+    Networks: resolve("Networks"),
+    Operation: resolve("Operation"),
+    Memo: resolve("Memo"),
+    Asset: resolve("Asset"),
   };
   return cachedModule;
 }

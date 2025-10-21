@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { submitSignedTransaction } from "@/src/lib/custodian/attestation";
-import { STELLAR_NETWORK_PASSPHRASE } from "@/src/lib/stellar/sdk";
+import { getNetworkPassphrase } from "@/src/lib/stellar/sdk.server";
 
 export const runtime = "nodejs";
 
@@ -32,7 +32,7 @@ export async function POST(request: NextRequest) {
 
   try {
     const { Transaction, Keypair } = await import("stellar-sdk");
-    const passphrase = STELLAR_NETWORK_PASSPHRASE || "Test SDF Network ; September 2015";
+    const passphrase = getNetworkPassphrase();
     const transaction = new Transaction(unsignedXdr, passphrase);
     const signer = Keypair.fromSecret(secret);
     transaction.sign(signer);

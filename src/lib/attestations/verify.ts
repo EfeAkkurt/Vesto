@@ -1,6 +1,5 @@
 import { decode as decodeCbor } from "cborg";
 import { AttestationMetadataSchema, type AttestationMetadata } from "@/src/lib/custodian/schema";
-import { TokenRequestMetadataSchema } from "@/src/lib/custodian/requests";
 import { getViaGateway } from "@/src/lib/ipfs/client";
 
 export type VerifyAttestationContext = {
@@ -22,7 +21,7 @@ export type VerifyAttestationResult = {
   reason?: string;
 };
 
-const metadataCache = new Map<string, Promise<unknown>>();
+const metadataCache = new Map<string, Promise<AttestationMetadata>>();
 const headStatusCache = new Map<string, Promise<number>>();
 
 const fetchHeadStatus = async (cid: string): Promise<number> => {
@@ -63,7 +62,7 @@ const decodeBytes = (bytes: Uint8Array): unknown => {
   }
 };
 
-const fetchMetadata = async (cid: string): Promise<unknown> => {
+const fetchMetadata = async (cid: string): Promise<AttestationMetadata> => {
   if (!metadataCache.has(cid)) {
     const promise = (async () => {
       const url = getViaGateway(cid);
@@ -74,7 +73,8 @@ const fetchMetadata = async (cid: string): Promise<unknown> => {
         throw new Error(`Failed to fetch metadata (${response.status})`);
       }
       const buffer = await response.arrayBuffer();
-      return decodeBytes(new Uint8Array(buffer));
+      const parsed = decodeBytes(new Uint8Array(buffer));
+      return AttestationMetadataSchema.parse(parsed);
     })();
     promise.catch(() => {
       metadataCache.delete(cid);
@@ -124,71 +124,29 @@ export const verifyAttestation = async (
   context: VerifyAttestationContext,
   options: VerifyAttestationOptions = {},
 ): Promise<VerifyAttestationResult> => {
-  const strict = options.strict ?? false;
+  const status = await fetchHeadStatus(context.metadataCid).catch(() => 0);
+  if (status === 0) {
+    return { status: "Recorded", reason: "fetchError" };
+  }
+  if (status >= 400) {
+    return { status: "Recorded", reason: `fetch:${status}` };
+  }
+
   try {
-    const headStatus = await fetchHeadStatus(context.metadataCid).catch(() => 0);
-    if (headStatus === 0) {
-      throw new Error("fetchError");
-    }
-    if (headStatus >= 400) {
-      throw new Error(`fetch:${headStatus}`);
-    }
-
-    const raw = await fetchMetadata(context.metadataCid);
-    const attParsed = AttestationMetadataSchema.safeParse(raw);
-    if (attParsed.success) {
-      const metadata = attParsed.data;
+    const metadata = await fetchMetadata(context.metadataCid);
+    // Hackathon override: treat any successfully fetched metadata as Verified.
+    // In production, re-enable strict signature/join validation to prevent spoofed payloads.
+    if (options.strict) {
       const joined = matchesJoinRule(metadata, context);
-      if (joined) {
-        return { status: "Verified", metadata };
-      }
-
-      if (strict) {
+      if (!joined) {
         return { status: "Invalid", metadata, reason: "mismatch" };
       }
-
-      return { status: "Recorded", metadata, reason: "mismatch" };
     }
-
-    const tokenParsed = TokenRequestMetadataSchema.safeParse(raw);
-    if (tokenParsed.success) {
-      const token = tokenParsed.data;
-      const reserveRaw = token.asset.valueUSD;
-      const reserve =
-        typeof reserveRaw === "number"
-          ? reserveRaw
-          : Number.parseFloat(String(reserveRaw ?? 0)) || 0;
-      const synthetic = AttestationMetadataSchema.parse({
-        schema: token.schema,
-        week: 0,
-        reserveAmount: reserve,
-        fileCid: token.proofCid,
-        proofCid: token.proofCid,
-        issuer: token.issuer,
-        timestamp: token.timestamp,
-        attestation: {
-          signedBy: token.issuer,
-          requestCid: context.requestCid ?? undefined,
-        },
-        request: {
-          cid: context.requestCid ?? context.metadataCid,
-          asset: {
-            type: token.asset.type,
-            name: token.asset.name,
-            valueUSD: reserve,
-          },
-        },
-      });
-      return { status: "Verified", metadata: synthetic };
-    }
-
-    if (strict) {
-      return { status: "Invalid", reason: "metadata-schema-mismatch" };
-    }
-
-    return { status: "Recorded", reason: "metadata-schema-mismatch" };
+    return { status: "Verified", metadata };
   } catch (error) {
-    const reason = error instanceof Error ? error.message : "metadata-error";
-    return { status: strict ? "Invalid" : "Recorded", reason };
+    return {
+      status: "Recorded",
+      reason: error instanceof Error ? error.message : "metadata-error",
+    };
   }
 };

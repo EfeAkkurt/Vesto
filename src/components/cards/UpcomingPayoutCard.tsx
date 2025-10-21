@@ -1,6 +1,7 @@
 "use client";
 
 import type { FC } from "react";
+import Link from "next/link";
 import { motion, useReducedMotion } from "framer-motion";
 import type { PayoutSchedule } from "@/src/lib/dashboard/types";
 import { formatCurrency, formatDate } from "@/src/lib/utils/format";
@@ -31,12 +32,12 @@ export const UpcomingPayoutCard: FC<UpcomingPayoutCardProps> = ({ schedule, isLo
           <h2 className="text-sm font-semibold text-foreground/90">Upcoming Payouts</h2>
           <p className="text-xs text-muted-foreground">Stay current on treasury distributions</p>
         </div>
-        <button
-          type="button"
+        <Link
+          href="/spv"
           className="rounded-full border border-primary/40 bg-primary/10 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-primary transition hover:border-primary/60 hover:bg-primary/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
         >
           View schedule
-        </button>
+        </Link>
       </header>
       <div className="mt-4 space-y-4">
         {isLoading ? (
@@ -68,7 +69,9 @@ export const UpcomingPayoutCard: FC<UpcomingPayoutCardProps> = ({ schedule, isLo
               >
                 <div>
                   <p className="font-semibold text-foreground/80">{formatDate(item.date)}</p>
-                  <p className="text-muted-foreground">IPFS {item.ipfs}</p>
+                  <p className="text-muted-foreground">
+                    {item.ipfs ? `IPFS ${item.ipfs}` : "Pending CID"}
+                  </p>
                 </div>
                 <span className="font-semibold text-primary">{formatCurrency(item.amount)}</span>
               </div>

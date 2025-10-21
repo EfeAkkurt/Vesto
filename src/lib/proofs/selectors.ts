@@ -5,6 +5,7 @@ import type { Attestation, ProofStatus, ProofType } from "@/src/lib/types/proofs
 import type { StoredProof } from "@/src/lib/proofs/storage";
 import { formatDate, formatDateTime, formatRelativeTime } from "@/src/lib/utils/format";
 import { shortHash } from "@/src/lib/utils/format";
+import type { ReserveProofRecord } from "@/src/lib/spv/store";
 
 export type ProofListItem = {
   id: string;
@@ -77,10 +78,11 @@ const QUICK_CARD_DESCRIPTIONS: Record<ProofType, string> = {
   "Legal Agreement": "Master trust agreement outlining SPV structure and investor rights.",
   Ownership: "Ownership documentation submitted by custodial entities.",
   Appraisal: "Third-party valuation or appraisal supporting reserve claims.",
+  "Reserve Proof": "Weekly reserve JSON committed on-chain via memo hash.",
   Other: "Additional documentation supplied by the custodian.",
 };
 
-const PRIMARY_CARD_TYPES: ProofType[] = ["Audit Report", "Insurance Policy", "Legal Agreement"];
+const PRIMARY_CARD_TYPES: ProofType[] = ["Audit Report", "Insurance Policy", "Legal Agreement", "Reserve Proof"];
 
 const normalizeStatus = (status?: ProofStatus): ProofStatus => {
   if (status === "Verified" || status === "Invalid" || status === "Recorded") return status;
@@ -149,11 +151,29 @@ const resolveJoinedAttestation = (
   return null;
 };
 
-export const buildProofList = (stored: StoredProof[], attestations: Attestation[]): ProofListItem[] => {
+const toReserveSubtitle = (proof: ReserveProofRecord): string => {
+  const week = proof.metadata?.week ?? null;
+  if (week != null) {
+    return `Week ${week}`;
+  }
+  return "Reserve commitment";
+};
+
+const toReserveStatus = (status: ReserveProofRecord["status"]): ProofStatus => {
+  if (status === "Invalid") return "Invalid";
+  if (status === "Verified") return "Verified";
+  return "Recorded";
+};
+
+export const buildProofList = (
+  stored: StoredProof[],
+  attestations: Attestation[],
+  reserveProofs: ReserveProofRecord[] = [],
+): ProofListItem[] => {
   const maps = buildAttestationMaps(attestations);
   const custodianAccountUpper = toUpper(process.env.NEXT_PUBLIC_CUSTODIAN_ACCOUNT);
 
-  const list = stored.map<ProofListItem>((entry) => {
+  const list: ProofListItem[] = stored.map((entry) => {
     const matched = resolveJoinedAttestation(entry, maps, custodianAccountUpper);
     const status: ProofStatus = matched
       ? matched.status === "Verified"
@@ -187,7 +207,37 @@ export const buildProofList = (stored: StoredProof[], attestations: Attestation[
     };
   });
 
-  return list.sort((a, b) => new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime());
+  const reserveItems = reserveProofs.map<ProofListItem>((proof) => {
+    const status = toReserveStatus(proof.status);
+    const uploaded = formatUploadedAt(proof.ts);
+    const memoHex = proof.memoHashHex ?? "";
+    return {
+      id: `reserve:${proof.txHash}:${proof.cid}`,
+      type: "Reserve Proof",
+      title: "Reserve Proof",
+      subtitle: toReserveSubtitle(proof),
+      cid: proof.cid,
+      metadataCid: proof.cid,
+      sha256: memoHex,
+      hashLabel: memoHex,
+      hashShort: memoHex ? shortHash(memoHex, 8, 6) : "",
+      uploadedAt: uploaded.iso,
+      uploadedAtLabel: uploaded.label,
+      status,
+      verifiedBy: undefined,
+      verifiedAt: proof.metadata?.asOf,
+      verifiedAtLabel: proof.metadata?.asOf ? formatDateTime(proof.metadata.asOf) : undefined,
+      txHash: proof.txHash,
+      gatewayUrl: proof.gatewayUrl,
+      size: undefined,
+      mime: "application/json",
+      source: "attestation",
+    } satisfies ProofListItem;
+  });
+
+  return [...list, ...reserveItems].sort(
+    (a, b) => new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime(),
+  );
 };
 
 export const buildQuickCards = (proofs: ProofListItem[]): ProofQuickCard[] =>

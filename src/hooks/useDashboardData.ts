@@ -11,8 +11,10 @@ import {
   CUSTODIAN_ACCOUNT,
   TOKEN_ASSET_CODE,
   TOKEN_ASSET_ISSUER,
+  getSpvAccount,
 } from "@/src/utils/constants";
 import type { HorizonAccount, HorizonEffect, HorizonOperation } from "@/src/hooks/horizon";
+import { resolveReserveProofs, type ReserveProofRecord } from "@/src/lib/spv/store";
 
 const DASHBOARD_ACCOUNT = CUSTODIAN_ACCOUNT?.trim();
 
@@ -55,6 +57,21 @@ const ensureAccount = () => {
     throw new Error("NEXT_PUBLIC_CUSTODIAN_ACCOUNT must be configured.");
   }
   return DASHBOARD_ACCOUNT;
+};
+
+const fetchSpvReserveProofs = async (): Promise<ReserveProofRecord[]> => {
+  const accountId = getSpvAccount();
+  const server = (await getHorizonServer()) as unknown as HorizonDashboardServer;
+
+  let operationsQuery = server.operations().forAccount(accountId).order("desc").limit(200);
+  if (typeof operationsQuery.includeTransactions === "function") {
+    operationsQuery = operationsQuery.includeTransactions(true);
+  } else if (typeof operationsQuery.join === "function") {
+    operationsQuery = operationsQuery.join("transactions");
+  }
+
+  const operationsPage = await wrapCall(() => operationsQuery.call());
+  return resolveReserveProofs(operationsPage.records as unknown as HorizonOperation[]);
 };
 
 const fetchDashboardAttestations = async (): Promise<Attestation[]> => {
@@ -109,8 +126,11 @@ const fetchDashboardKpis = async (): Promise<DashboardKpi> => {
 };
 
 const fetchDashboardReserves = async (): Promise<ReservePoint[]> => {
-  const attestations = await fetchDashboardAttestations();
-  return buildReservePoints(attestations);
+  const [attestations, reserves] = await Promise.all([
+    fetchDashboardAttestations(),
+    fetchSpvReserveProofs(),
+  ]);
+  return buildReservePoints(attestations, reserves);
 };
 
 const emptyKpi: DashboardKpi = {

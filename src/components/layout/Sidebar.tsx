@@ -59,6 +59,15 @@ const NavIcon = ({ icon }: { icon: (typeof SIDEBAR_NAV)[number]["icon"] }) => {
           <path d="M5 19h14" strokeLinecap="round" />
         </svg>
       );
+    case "spv":
+      return (
+        <svg {...props}>
+          <path d="M4 18v-5a8 8 0 018-8h0a8 8 0 018 8v5" />
+          <path d="M8 21h8" strokeLinecap="round" />
+          <path d="M9 13h6" />
+          <path d="M12 10v6" />
+        </svg>
+      );
     case "bridge":
     default:
       return (

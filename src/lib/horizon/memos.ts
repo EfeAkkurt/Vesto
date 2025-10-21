@@ -8,7 +8,7 @@ const toCidV1 = (raw: string): string | null => {
     const parsed = CID.parse(raw);
     const v1 = parsed.toV1().toString();
     if (parsed.version === 0 && parsed.toString() !== v1) {
-      debug("[pipeline:custodian] memo CID upgraded to v1", { original: raw, upgraded: v1 });
+      debug("[custodian:memo] CID upgraded to v1", { original: raw, upgraded: v1 });
     }
     return v1;
   } catch {

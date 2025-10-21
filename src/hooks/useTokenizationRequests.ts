@@ -5,7 +5,6 @@ import { fetchCustodianRequests, type CustodianRequestDiagnostics, type Custodia
 import { CUSTODIAN_ACCOUNT, STELLAR_NET } from "@/src/utils/constants";
 import { debugObj } from "@/src/lib/logging/logger";
 
-const REFRESH_INTERVAL_MS = 12_000;
 const KEY_PREFIX = "custodian-requests" as const;
 const DEFAULT_LIMIT = 100;
 
@@ -64,9 +63,11 @@ export const useTokenizationRequests = (accountId?: string) => {
     : null;
 
   const { data, error, isLoading, mutate } = useSWR<CustodianRequestResult>(swrKey, fetcher, {
-    refreshInterval: REFRESH_INTERVAL_MS,
-    revalidateOnFocus: true,
-    revalidateOnReconnect: true,
+    refreshInterval: 0,
+    revalidateOnFocus: false,
+    revalidateOnReconnect: false,
+    shouldRetryOnError: false,
+    errorRetryCount: 0,
   });
 
   const diagnostics = data?.diagnostics ?? EMPTY_DIAGNOSTICS;
@@ -74,7 +75,7 @@ export const useTokenizationRequests = (accountId?: string) => {
   const rescan = async () => {
     const result = await mutate();
     if (result && (result.items?.length ?? 0) === 0) {
-      debugObj("[pipeline:custodian] rescan-empty", {
+      debugObj("[custodian:requests] rescan-empty", {
         account: maskAccount(result.diagnostics.account),
         totals: {
           horizon: result.diagnostics.horizonCount,

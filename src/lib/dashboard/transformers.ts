@@ -7,6 +7,7 @@ import {
   type PayoutSchedule,
   type ReservePoint,
 } from "./types";
+import type { ReserveProofRecord } from "@/src/lib/spv/store";
 
 const METRIC_CONFIG: Array<Omit<DashboardMetric, "value" | "delta" | "trend">> = [
   {
@@ -122,7 +123,61 @@ const sortByTimestampDesc = <T extends { ts: string }>(items: T[]): T[] =>
 const sortByTimestampAsc = <T extends { ts: string }>(items: T[]): T[] =>
   [...items].sort((a, b) => new Date(a.ts).getTime() - new Date(b.ts).getTime());
 
-export const buildReservePoints = (attestations: Attestation[]): ReservePoint[] => {
+const coerceReserveEntry = (reserve: ReserveProofRecord): { ts: string; reserveUSD: number } | null => {
+  const metadata = reserve.metadata;
+  if (!metadata) return null;
+  const value = Number.parseFloat(String(metadata.reserveUSD ?? 0));
+  if (!Number.isFinite(value)) return null;
+  return {
+    ts: metadata.asOf ?? reserve.ts,
+    reserveUSD: value,
+  };
+};
+
+export const buildReservePoints = (
+  attestations: Attestation[],
+  reserves: ReserveProofRecord[] = [],
+): ReservePoint[] => {
+  const reserveEntries = reserves
+    .map(coerceReserveEntry)
+    .filter((entry): entry is { ts: string; reserveUSD: number } => entry !== null);
+
+  if (reserveEntries.length) {
+    const chronological = sortByTimestampAsc(reserveEntries);
+    const points: ReservePoint[] = chronological.map((entry, index) => {
+      const previous = chronological[index - 1];
+      const delta = previous ? entry.reserveUSD - previous.reserveUSD : entry.reserveUSD;
+      return {
+        date: entry.ts,
+        reserveUSD: entry.reserveUSD,
+        payoutProjected: Math.max(delta, 0),
+      } satisfies ReservePoint;
+    });
+
+    if (chronological.length >= 2) {
+      const deltas = chronological
+        .map((entry, index) => {
+          if (index === 0) return 0;
+          const previous = chronological[index - 1];
+          return entry.reserveUSD - previous.reserveUSD;
+        })
+        .filter((delta) => Number.isFinite(delta) && delta > 0);
+      const averageDelta = deltas.length ? deltas.reduce((total, delta) => total + delta, 0) / deltas.length : 0;
+      const last = chronological[chronological.length - 1];
+      if (averageDelta > 0) {
+        const nextDate = new Date(last.ts);
+        nextDate.setDate(nextDate.getDate() + 7);
+        points.push({
+          date: nextDate.toISOString(),
+          reserveUSD: last.reserveUSD + averageDelta,
+          payoutProjected: averageDelta,
+        });
+      }
+    }
+
+    return points;
+  }
+
   if (!attestations.length) return [];
   const chronological = sortByTimestampAsc(attestations);
   const points: ReservePoint[] = chronological.map((att, index) => {

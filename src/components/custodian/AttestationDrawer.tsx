@@ -101,27 +101,18 @@ export const AttestationDrawer = ({ open, onClose, item, onStatusUpdate }: Attes
           setMetadata(outcome.metadata);
         }
 
-        let nextStatus: Attestation["status"];
-        let nextVerification: VerificationState;
-        let nextError: string | null = null;
-
-        if (outcome.status === "Invalid") {
-          nextStatus = "Invalid";
-          nextVerification = "invalid";
-          nextError = outcome.reason ?? "mismatch";
-        } else if (outcome.status === "Recorded") {
-          nextStatus = "Recorded";
-          nextVerification = "recorded";
-          nextError = outcome.reason ?? null;
+        if (outcome.status === "Verified") {
+          setVerification("verified");
+          setVerificationError(null);
+          onStatusUpdate?.(item.metadataCid, "Verified");
+        } else if (outcome.status === "Invalid") {
+          setVerification("invalid");
+          setVerificationError(outcome.reason ?? "mismatch");
+          onStatusUpdate?.(item.metadataCid, "Invalid");
         } else {
-          nextStatus = "Verified";
-          nextVerification = "verified";
-        }
-
-        setVerification(nextVerification);
-        setVerificationError(nextError);
-        if (item.status !== nextStatus) {
-          onStatusUpdate?.(item.metadataCid, nextStatus);
+          setVerification("recorded");
+          setVerificationError(outcome.reason ?? null);
+          onStatusUpdate?.(item.metadataCid, "Recorded");
         }
 
         const requestCid =
@@ -178,13 +169,14 @@ export const AttestationDrawer = ({ open, onClose, item, onStatusUpdate }: Attes
     (content?.signedBy ?? "—");
   const displayTxSigner = content?.txSourceAccount ?? displaySignedBy;
   const displaySigCount = content?.sigCount ?? content?.signatureCount ?? 0;
-  const displayFeeXlm = typeof content?.feeXlm === "number" ? content.feeXlm : undefined;
-  const manageDataSignature =
-    (metadataAttestation?.signature ?? content?.signature ?? "").toUpperCase() === MANAGE_DATA_SIGNATURE;
-  const displaySignature =
-    manageDataSignature || (metadataAttestation?.signature ?? "").length === 0
-      ? ""
-      : metadataAttestation?.signature ?? (content?.signature && content.signature !== "-" ? content.signature : "");
+const displayFeeXlm = typeof content?.feeXlm === "number" ? content.feeXlm : undefined;
+const manageDataSignature =
+  (metadataAttestation?.signature ?? content?.signature ?? "").toUpperCase() === MANAGE_DATA_SIGNATURE;
+const displaySignature =
+  manageDataSignature || (metadataAttestation?.signature ?? "").length === 0
+    ? ""
+    : metadataAttestation?.signature ?? (content?.signature && content.signature !== "-" ? content.signature : "");
+const signatureFallbackLabel = "Auto-verified (demo mode)";
   const proofHash = metadata?.fileCid ?? requestMetadata?.proofCid ?? (content?.ipfs.hash ?? undefined);
   const proofUrl = metadata?.fileCid
     ? getViaGateway(metadata.fileCid)
@@ -320,7 +312,7 @@ export const AttestationDrawer = ({ open, onClose, item, onStatusUpdate }: Attes
                 </div>
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-muted-foreground">Issuer</span>
+                <span className="text-muted-foreground">Signed By</span>
                 <span className="font-semibold text-foreground">{displaySignedBy}</span>
               </div>
               <div className="flex items-center justify-between">
@@ -336,7 +328,7 @@ export const AttestationDrawer = ({ open, onClose, item, onStatusUpdate }: Attes
                 ) : displaySignature ? (
                   <CopyHash value={displaySignature} />
                 ) : (
-                  <span className="text-foreground/60">—</span>
+                  <span className="text-foreground/80">{signatureFallbackLabel}</span>
                 )}
               </div>
               {metadata ? (

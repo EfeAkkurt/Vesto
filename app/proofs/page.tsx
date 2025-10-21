@@ -35,9 +35,10 @@ import { PROOF_TYPE_OPTIONS, type ProofType, type ProofStatus } from "@/src/lib/
 import type { StoredProof } from "@/src/lib/proofs/storage";
 import { CUSTODIAN_ACCOUNT } from "@/src/utils/constants";
 import { refreshProofsAll } from "@/src/lib/swr/mutateBus";
+import { useReserveProofs } from "@/src/hooks/useReserveProofs";
 
 const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024;
-const FORM_PROOF_TYPES: ProofType[] = ["Audit Report", "Insurance Policy", "Legal Agreement", "Other"];
+const FORM_PROOF_TYPES: ProofType[] = ["Audit Report", "Insurance Policy", "Legal Agreement", "Reserve Proof", "Other"];
 const TYPE_FILTER_OPTIONS = ["All", ...PROOF_TYPE_OPTIONS] as const;
 const STATUS_FILTER_OPTIONS: Array<ProofStatus | "all"> = ["all", "Verified", "Recorded", "Pending", "Invalid"];
 const PAGE_SIZE = 10;
@@ -157,10 +158,11 @@ const ProofsPage = () => {
   const operationsResponse = useAccountOperations(custodianAccount, 200);
   const effectsResponse = useAccountEffects(custodianAccount, 120);
   const attestationState = useAttestations(custodianAccount, operationsResponse.data, effectsResponse.data);
+  const reserveState = useReserveProofs(operationsResponse.data);
 
   const proofList = useMemo<ProofListItem[]>(
-    () => buildProofList(storedProofs.proofs, attestationState.data ?? []),
-    [storedProofs.proofs, attestationState.data],
+    () => buildProofList(storedProofs.proofs, attestationState.data ?? [], reserveState.data ?? []),
+    [storedProofs.proofs, attestationState.data, reserveState.data],
   );
 
   const quickCards = useMemo(
@@ -179,8 +181,8 @@ const ProofsPage = () => {
   );
 
   const reserveSeries = useMemo(
-    () => buildReservePoints(attestationState.data ?? []),
-    [attestationState.data],
+    () => buildReservePoints(attestationState.data ?? [], reserveState.data ?? []),
+    [attestationState.data, reserveState.data],
   );
 
   const stats = useMemo(

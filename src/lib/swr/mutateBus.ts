@@ -15,3 +15,12 @@ export const refreshProofsAll = async () => {
     mutate("proofs:reserves"),
   ]);
 };
+
+export const refreshSpvAll = async () => {
+  await Promise.all([
+    mutate("spv:balance"),
+    mutate("spv:income|7"),
+    mutate("spv:income|30"),
+    mutate("spv:holders"),
+  ]);
+};
