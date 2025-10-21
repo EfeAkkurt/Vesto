@@ -36,6 +36,7 @@ import type { StoredProof } from "@/src/lib/proofs/storage";
 import { CUSTODIAN_ACCOUNT } from "@/src/utils/constants";
 import { refreshProofsAll } from "@/src/lib/swr/mutateBus";
 import { useReserveProofs } from "@/src/hooks/useReserveProofs";
+import { useBridgeLocks, useBridgeMints, useBridgeRedeems } from "@/src/hooks/useBridge";
 
 const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024;
 const FORM_PROOF_TYPES: ProofType[] = ["Audit Report", "Insurance Policy", "Legal Agreement", "Reserve Proof", "Other"];
@@ -159,10 +160,28 @@ const ProofsPage = () => {
   const effectsResponse = useAccountEffects(custodianAccount, 120);
   const attestationState = useAttestations(custodianAccount, operationsResponse.data, effectsResponse.data);
   const reserveState = useReserveProofs(operationsResponse.data);
+  const bridgeLocksState = useBridgeLocks();
+  const bridgeMintsState = useBridgeMints();
+  const bridgeRedeemsState = useBridgeRedeems();
 
   const proofList = useMemo<ProofListItem[]>(
-    () => buildProofList(storedProofs.proofs, attestationState.data ?? [], reserveState.data ?? []),
-    [storedProofs.proofs, attestationState.data, reserveState.data],
+    () =>
+      buildProofList(
+        storedProofs.proofs,
+        attestationState.data ?? [],
+        reserveState.data ?? [],
+        bridgeLocksState.data ?? [],
+        bridgeMintsState.data ?? [],
+        bridgeRedeemsState.data ?? [],
+      ),
+    [
+      storedProofs.proofs,
+      attestationState.data,
+      reserveState.data,
+      bridgeLocksState.data,
+      bridgeMintsState.data,
+      bridgeRedeemsState.data,
+    ],
   );
 
   const quickCards = useMemo(

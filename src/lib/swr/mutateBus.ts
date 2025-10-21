@@ -16,6 +16,15 @@ export const refreshProofsAll = async () => {
   ]);
 };
 
+export const refreshBridgeAll = async () => {
+  await Promise.all([
+    mutate("bridge:locks"),
+    mutate("bridge:mints"),
+    mutate("bridge:redeems"),
+    mutate("bridge:stats"),
+  ]);
+};
+
 export const refreshSpvAll = async () => {
   await Promise.all([
     mutate("spv:balance"),

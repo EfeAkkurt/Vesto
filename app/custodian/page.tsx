@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { motion, useReducedMotion } from "framer-motion";
 import { transitions, fadeInUp } from "@/src/components/motion/presets";
 import { LayoutShell } from "@/src/components/layout/LayoutShell";
@@ -12,6 +12,7 @@ import { AttestationTimeline } from "@/src/components/custodian/AttestationTimel
 import { AttestationDrawer } from "@/src/components/custodian/AttestationDrawer";
 import { SubmissionModal } from "@/src/components/custodian/SubmissionModal";
 import type { Attestation } from "@/src/lib/types/proofs";
+import type { AttestationMetadata } from "@/src/lib/custodian/schema";
 import { formatUSD, formatDateTime, formatXlm } from "@/src/lib/utils/format";
 import { useAccountOperations, useAccountEffects } from "@/src/hooks/horizon";
 import { useAttestations } from "@/src/hooks/useAttestations";
@@ -70,8 +71,36 @@ const CustodianPage = () => {
 
   const operationsResponse = useAccountOperations(custodianAccount, 120);
   const effectsResponse = useAccountEffects(custodianAccount, 60);
-  const attestationState = useAttestations(custodianAccount, operationsResponse.data, effectsResponse.data);
-  const attestations = useMemo(() => attestationState.data ?? [], [attestationState.data]);
+const attestationState = useAttestations(custodianAccount, operationsResponse.data, effectsResponse.data);
+const rawAttestations = useMemo(() => attestationState.data ?? [], [attestationState.data]);
+const [attestationOverrides, setAttestationOverrides] = useState<Map<string, Partial<Attestation>>>(new Map());
+useEffect(() => {
+  if (!attestationOverrides.size) return;
+  setAttestationOverrides((prev) => {
+    let changed = false;
+    const next = new Map(prev);
+    rawAttestations.forEach((att) => {
+      const override = next.get(att.metadataCid);
+      if (!override) return;
+      const statusMatch = override.status ? override.status === att.status : true;
+      const reserveMatch = override.reserveUSD !== undefined ? override.reserveUSD === att.reserveUSD : true;
+      const timestampMatch = override.ts !== undefined ? override.ts === att.ts : true;
+      if (statusMatch && reserveMatch && timestampMatch) {
+        next.delete(att.metadataCid);
+        changed = true;
+      }
+    });
+    return changed ? next : prev;
+  });
+}, [rawAttestations, attestationOverrides]);
+  const attestations = useMemo(() => {
+    if (attestationOverrides.size === 0) return rawAttestations;
+    return rawAttestations.map((att) => {
+      const override = attestationOverrides.get(att.metadataCid);
+      if (!override) return att;
+      return { ...att, ...override };
+    });
+  }, [rawAttestations, attestationOverrides]);
 
   const {
     items: rawRequests,
@@ -191,6 +220,7 @@ const CustodianPage = () => {
   const [submission, setSubmission] = useState<Attestation | null>(null);
   const [debugOpen, setDebugOpen] = useState(false);
   const [peekOpen, setPeekOpen] = useState(false);
+  const refreshThrottleRef = useRef(0);
 
   const handleAttestationOpen = (attestation: Attestation) => {
     setSelectedAttestation(attestation);
@@ -202,19 +232,58 @@ const CustodianPage = () => {
     setSelectedAttestation(null);
   };
 
-  const handleAttestationStatusUpdate = (metadataCid: string, status: Attestation["status"]) => {
-    setSelectedAttestation((current) =>
-      current && current.metadataCid === metadataCid ? { ...current, status } : current,
-    );
-    const tasks = [
-      operationsResponse.mutate?.(),
-      effectsResponse.mutate?.(),
-      rescan(),
-    ].filter(Boolean) as Promise<unknown>[];
-    if (tasks.length) {
-      void Promise.allSettled(tasks);
-    }
-  };
+  const operationsMutate = operationsResponse.mutate;
+  const effectsMutate = effectsResponse.mutate;
+
+  const handleAttestationStatusUpdate = useCallback(
+    (
+      metadataCid: string,
+      status: Attestation["status"],
+      payload?: { reserveAmount?: number; timestamp?: string; metadata?: AttestationMetadata },
+    ) => {
+      setSelectedAttestation((current) =>
+        current && current.metadataCid === metadataCid
+          ? {
+              ...current,
+              status,
+              reserveUSD: payload?.reserveAmount ?? current.reserveUSD,
+              ts: payload?.timestamp ?? current.ts,
+            }
+          : current,
+      );
+      setAttestationOverrides((prev) => {
+        const next = new Map(prev);
+        const existing = next.get(metadataCid) ?? {};
+        const updated: Partial<Attestation> = {
+          ...existing,
+          status,
+        };
+        if (payload?.reserveAmount !== undefined) {
+          updated.reserveUSD = payload.reserveAmount;
+        }
+        if (payload?.timestamp) {
+          updated.ts = payload.timestamp;
+        }
+        next.set(metadataCid, updated);
+        return next;
+      });
+      const now = Date.now();
+      const shouldRefresh = now - refreshThrottleRef.current >= 2000;
+      if (!shouldRefresh) {
+        return;
+      }
+      refreshThrottleRef.current = now;
+      const tasks = [
+        operationsMutate?.(),
+        effectsMutate?.(),
+        rescan(),
+      ].filter(Boolean) as Promise<unknown>[];
+      if (tasks.length) {
+        void Promise.allSettled(tasks);
+      }
+    },
+    [operationsMutate, effectsMutate, rescan],
+  );
 
   const handleSubmission = async (attestation: Attestation) => {
     setSubmission(attestation);

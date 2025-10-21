@@ -1,7 +1,11 @@
 import { Buffer } from "buffer";
 import { encode } from "cborg";
 import nacl from "tweetnacl";
-import { loadStellar, getServer as getHorizonServer, STELLAR_NETWORK_PASSPHRASE } from "@/src/lib/stellar/sdk";
+import {
+  loadStellar,
+  getServer as getClientHorizonServer,
+  STELLAR_NETWORK_PASSPHRASE,
+} from "@/src/lib/stellar/sdk.client";
 import { AttestationMsgSchema, type AttestationMsgShape } from "@/src/lib/custodian/schema";
 import { signTx } from "@/lib/wallet/freighter";
 
@@ -303,7 +307,7 @@ export const buildAndSubmitMemoTx = async ({
     throw new Error("Provided network passphrase does not match NEXT_PUBLIC_NETWORK_PASSPHRASE.");
   }
 
-  const server = (await getHorizonServer()) as unknown as StellarServerLike;
+  const server = (await getClientHorizonServer()) as unknown as StellarServerLike;
   const sourceAccount = await server.loadAccount(trimmedAccount);
   const baseFee = await server.fetchBaseFee();
 
@@ -389,7 +393,7 @@ export const submitAttestationTransaction = async ({
     throw new Error("Provided network passphrase does not match NEXT_PUBLIC_NETWORK_PASSPHRASE.");
   }
 
-  const server = (await getHorizonServer()) as unknown as StellarServerLike;
+  const server = (await getClientHorizonServer()) as unknown as StellarServerLike;
   const sourceAccount = await server.loadAccount(trimmedAccount);
 
   const memoBytes = memoHashHex ? hexToBytes(memoHashHex) : await digestSha256(encodeUtf8(metadataValue));

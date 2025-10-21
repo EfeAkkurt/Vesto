@@ -3,6 +3,7 @@ import { debugObj } from "@/src/lib/logging/logger";
 import { getSpvAccount, getSusdAssetOrNull } from "@/src/utils/constants";
 export { getHolders } from "@/src/lib/spv/holders";
 import type { SpvIncome, SpvPayment } from "@/src/lib/types/spv";
+import { getHorizonServer } from "@/src/lib/stellar/horizon";
 
 const MAX_RECORDS = 200;
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -18,33 +19,6 @@ type PaymentsCallBuilder = {
 
 type HorizonServer = {
   payments(): PaymentsCallBuilder;
-};
-
-let cachedServer: HorizonServer | null = null;
-
-const resolveHorizonServer = async (): Promise<HorizonServer> => {
-  if (typeof window === "undefined") {
-    if (!cachedServer) {
-      const sdkModule = await import("stellar-sdk");
-      const ServerCtor =
-        (sdkModule as { Server?: new (url: string) => unknown }).Server ??
-        (sdkModule as { Horizon?: { Server?: new (url: string) => unknown } }).Horizon?.Server ??
-        (sdkModule as { default?: { Server?: new (url: string) => unknown } }).default?.Server ??
-        (sdkModule as { default?: { Horizon?: { Server?: new (url: string) => unknown } } }).default?.Horizon?.Server;
-      if (!ServerCtor) {
-        throw new Error("Stellar SDK Server constructor unavailable.");
-      }
-      const url = process.env.HORIZON_URL ?? process.env.NEXT_PUBLIC_HORIZON_URL;
-      if (!url) {
-        throw new Error("HORIZON_URL is required to query Horizon.");
-      }
-      cachedServer = new ServerCtor(url) as unknown as HorizonServer;
-    }
-    return cachedServer;
-  }
-  const { getServer } = await import("@/src/lib/stellar/sdk");
-  const server = await getServer();
-  return server as unknown as HorizonServer;
 };
 
 const toFixedAmount = (stroops: number): string => {
@@ -80,7 +54,7 @@ export const fetchSpvIncome = async ({ days = 7 }: { days?: 7 | 30 } = {}): Prom
     throw new Error("SPV account is not configured.");
   }
 
-  const server = await resolveHorizonServer();
+  const server = (await getHorizonServer()) as HorizonServer;
   let builder = server.payments().forAccount(account).order("desc").limit(MAX_RECORDS);
   if (typeof builder.includeTransactions === "function") {
     builder = builder.includeTransactions(true);

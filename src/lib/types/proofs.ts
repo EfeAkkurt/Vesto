@@ -15,6 +15,7 @@ export const PROOF_TYPE_OPTIONS = [
   "Ownership",
   "Appraisal",
   "Reserve Proof",
+  "Bridge Proof",
   "Other",
 ] as const;
 

@@ -17,7 +17,15 @@ export type AttestationDrawerProps = {
   open: boolean;
   onClose: () => void;
   item?: Attestation | null;
-  onStatusUpdate?: (metadataCid: string, status: Attestation["status"]) => void;
+  onStatusUpdate?: (
+    metadataCid: string,
+    status: Attestation["status"],
+    payload?: {
+      reserveAmount?: number;
+      timestamp?: string;
+      metadata?: AttestationMetadata;
+    },
+  ) => void;
 };
 
 const statusBadge: Record<Attestation["status"], string> = {
@@ -37,6 +45,12 @@ export const AttestationDrawer = ({ open, onClose, item, onStatusUpdate }: Attes
   const [requestMetadata, setRequestMetadata] = useState<TokenRequestMetadata | null>(null);
   const [verification, setVerification] = useState<VerificationState>("idle");
   const [verificationError, setVerificationError] = useState<string | null>(null);
+  const verificationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastVerificationRef = useRef(0);
+  const verificationInFlightRef = useRef(false);
+  const lastStatusRef = useRef<Attestation["status"] | null>(null);
+  const lastMetadataRef = useRef<string | null>(null);
+  const drawerTickRef = useRef(0);
 
   useEffect(() => setMounted(true), []);
 
@@ -77,83 +91,170 @@ export const AttestationDrawer = ({ open, onClose, item, onStatusUpdate }: Attes
   }, [open, onClose]);
 
   useEffect(() => {
-    if (!open || !item) return;
+    drawerTickRef.current += 1;
+    const currentTick = drawerTickRef.current;
+    if (!open || !item) {
+      if (verificationTimerRef.current) {
+        clearTimeout(verificationTimerRef.current);
+        verificationTimerRef.current = null;
+      }
+      debug("[attestation:verify:schedule-cancelled]", {
+        metadataCid: item?.metadataCid ?? "n/a",
+        reason: open ? "unmounted" : "drawer-closed",
+      });
+      return;
+    }
+    const strictVerify = (process.env.NEXT_PUBLIC_STRICT_VERIFY ?? "").trim() === "1";
     let cancelled = false;
-    (async () => {
-      const strictVerify = (process.env.NEXT_PUBLIC_STRICT_VERIFY ?? "").trim() === "1";
-      setVerification("loading");
-      setVerificationError(null);
-      setMetadata(null);
-      setRequestMetadata(null);
+    const MIN_INTERVAL_MS = 2000;
 
-      try {
-        const context = {
-          metadataCid: item.metadataCid,
-          proofCid: item.proofCid ?? item.ipfs.hash,
-          memoHashHex: item.memoHashHex ?? null,
-          requestCid: item.requestCid,
-          requestMemoHashHex: item.requestMemoHashHex,
-        };
-        const outcome = await verifyAttestation(context, { strict: strictVerify });
-        if (cancelled) return;
-
-        if (outcome.metadata) {
-          setMetadata(outcome.metadata);
+    const scheduleVerification = () => {
+      if (cancelled) return;
+      const now = Date.now();
+      const elapsed = now - lastVerificationRef.current;
+      const delay = lastVerificationRef.current === 0 ? 0 : Math.max(0, MIN_INTERVAL_MS - elapsed);
+      if (verificationTimerRef.current) {
+        clearTimeout(verificationTimerRef.current);
+      }
+      verificationTimerRef.current = setTimeout(async () => {
+        if (cancelled || verificationInFlightRef.current) {
+          scheduleVerification();
+          return;
         }
-
-        if (outcome.status === "Verified") {
-          setVerification("verified");
+        verificationInFlightRef.current = true;
+        lastVerificationRef.current = Date.now();
+        try {
+          const context = {
+            metadataCid: item.metadataCid,
+            proofCid: item.proofCid ?? item.ipfs.hash,
+            memoHashHex: item.memoHashHex ?? null,
+            requestCid: item.requestCid,
+            requestMemoHashHex: item.requestMemoHashHex,
+          };
+          setVerification((state) => (state === "verified" || state === "recorded" ? state : "loading"));
           setVerificationError(null);
-          onStatusUpdate?.(item.metadataCid, "Verified");
-        } else if (outcome.status === "Invalid") {
-          setVerification("invalid");
-          setVerificationError(outcome.reason ?? "mismatch");
-          onStatusUpdate?.(item.metadataCid, "Invalid");
-        } else {
-          setVerification("recorded");
-          setVerificationError(outcome.reason ?? null);
-          onStatusUpdate?.(item.metadataCid, "Recorded");
-        }
+          debug("[attestation:verify:request]", {
+            metadataCid: context.metadataCid,
+            delayMs: Date.now() - lastVerificationRef.current,
+            strictVerify,
+          });
 
-        const requestCid =
-          item.requestCid ??
-          outcome.metadata?.request?.cid ??
-          outcome.metadata?.attestation?.requestCid ??
-          null;
+          const outcome = await verifyAttestation(context, { strict: strictVerify });
+          if (cancelled || drawerTickRef.current !== currentTick) {
+            return;
+          }
 
-        if (requestCid) {
-          try {
-            const response = await fetch(getViaGateway(requestCid), {
-              headers: { Accept: "application/json, application/cbor" },
+          if (outcome.metadata) {
+            setMetadata(outcome.metadata);
+          }
+
+          const nextStatus: Attestation["status"] =
+            outcome.status === "Verified"
+              ? "Verified"
+              : outcome.status === "Invalid"
+                ? "Invalid"
+                : "Recorded";
+          const reserveAmount = outcome.metadata?.reserveAmount;
+          const timestamp = outcome.metadata?.timestamp;
+
+          if (outcome.status === "Verified") {
+            setVerification("verified");
+            setVerificationError(null);
+          } else if (outcome.status === "Invalid") {
+            setVerification("invalid");
+            setVerificationError(outcome.reason ?? "mismatch");
+          } else {
+            setVerification("recorded");
+            setVerificationError(outcome.reason ?? null);
+          }
+          debug("[attestation:verify:status]", {
+            metadataCid: item.metadataCid,
+            status: outcome.status,
+            reason: outcome.reason ?? null,
+          });
+
+          if (nextStatus !== lastStatusRef.current) {
+            lastStatusRef.current = nextStatus;
+            onStatusUpdate?.(item.metadataCid, nextStatus, {
+              reserveAmount,
+              timestamp,
+              metadata: outcome.metadata,
             });
-            if (!response.ok) {
-              throw new Error(`Failed to fetch token request metadata (${response.status})`);
-            }
-            const payload = await response.json();
-            const parsed = TokenRequestMetadataSchema.safeParse(payload);
-            if (parsed.success && !cancelled) {
-              setRequestMetadata({
-                ...parsed.data,
-                proofUrl: parsed.data.proofUrl ?? getViaGateway(parsed.data.proofCid),
+          }
+
+          const requestCid =
+            item.requestCid ??
+            outcome.metadata?.request?.cid ??
+            outcome.metadata?.attestation?.requestCid ??
+            null;
+
+          if (requestCid) {
+            try {
+              const response = await fetch(getViaGateway(requestCid), {
+                headers: { Accept: "application/json, application/cbor" },
               });
-            }
-          } catch (error) {
-            if (!cancelled) {
-              debug("[attestation:request-metadata:error]", error instanceof Error ? error.message : String(error));
+              if (!response.ok) {
+                throw new Error(`Failed to fetch token request metadata (${response.status})`);
+              }
+              const payload = await response.json();
+              const parsed = TokenRequestMetadataSchema.safeParse(payload);
+              if (parsed.success && !cancelled) {
+                setRequestMetadata({
+                  ...parsed.data,
+                  proofUrl: parsed.data.proofUrl ?? getViaGateway(parsed.data.proofCid),
+                });
+              }
+            } catch (error) {
+              if (!cancelled) {
+                debug(
+                  "[attestation:request-metadata:error]",
+                  error instanceof Error ? error.message : String(error),
+                );
+              }
             }
           }
+        } catch (error) {
+          if (cancelled || drawerTickRef.current !== currentTick) {
+            return;
+          }
+          setVerification("error");
+          setVerificationError(error instanceof Error ? error.message : "Unknown error");
+          debug("[attestation:verify:error]", {
+            metadataCid: item.metadataCid,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        } finally {
+          verificationInFlightRef.current = false;
         }
-      } catch (error) {
-        if (cancelled) return;
-        setVerification("error");
-        setVerificationError(error instanceof Error ? error.message : "Unknown error");
-      }
-    })();
+      }, delay);
+      debug("[attestation:verify:schedule]", {
+        metadataCid: item.metadataCid,
+        delayMs: delay,
+      });
+    };
+
+    if (item.metadataCid !== lastMetadataRef.current) {
+      lastMetadataRef.current = item.metadataCid;
+      lastStatusRef.current = item.status ?? null;
+      setMetadata(null);
+      setRequestMetadata(null);
+      setVerification("loading");
+      setVerificationError(null);
+    }
+
+    scheduleVerification();
 
     return () => {
       cancelled = true;
+      if (verificationTimerRef.current) {
+        clearTimeout(verificationTimerRef.current);
+        verificationTimerRef.current = null;
+      }
+      debug("[attestation:verify:cleanup]", {
+        metadataCid: item.metadataCid,
+      });
     };
-  }, [open, item, onStatusUpdate]);
+  }, [open, item, item?.metadataCid, item?.proofCid, item?.requestCid, item?.memoHashHex, item?.requestMemoHashHex, onStatusUpdate]);
 
   const content = useMemo(() => item ?? null, [item]);
   const metadataAttestation = metadata?.attestation;

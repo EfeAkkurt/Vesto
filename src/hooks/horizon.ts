@@ -2,7 +2,7 @@
 
 import { useMemo } from "react";
 import useSWR, { type SWRConfiguration, type SWRResponse } from "swr";
-import { getServer as getHorizonServer } from "@/src/lib/stellar/sdk";
+import { getHorizonServer } from "@/src/lib/stellar/horizon";
 
 const RATE_LIMIT_DELAY_MS = 15_000;
 const DEFAULT_LIMIT = 25;

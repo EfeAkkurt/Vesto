@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { getServer } from "@/src/lib/stellar/sdk";
+import { getHorizonServer } from "@/src/lib/stellar/horizon";
 import { debug, debugObj } from "@/src/lib/logging/logger";
 import { CUSTODIAN_ACCOUNT, HORIZON, IPFS_GATEWAY } from "@/src/utils/constants";
 import { parseAmountToStroops } from "@/src/lib/utils/format";
@@ -11,8 +11,8 @@ export const TokenRequestMetadataSchema = z.object({
   asset: z.object({
     type: z.string().min(1),
     name: z.string().min(1),
-    valueUSD: z.number().nonnegative(),
-    expectedYieldPct: z.number().optional(),
+    valueUSD: z.coerce.number().nonnegative(),
+    expectedYieldPct: z.coerce.number().optional(),
   }),
   proofCid: z.string().min(1),
   proofUrl: z.string().optional(),
@@ -315,7 +315,7 @@ export const fetchCustodianRequests = async (
     };
   }
 
-  const server = (await getServer()) as HorizonServerApi;
+  const server = (await getHorizonServer()) as HorizonServerApi;
   const safeLimit = Number.isFinite(limit)
     ? Math.max(1, Math.min(200, Math.trunc(limit)))
     : 100;

@@ -48,6 +48,33 @@ export const ISSUER_ACCOUNT = process.env.NEXT_PUBLIC_ISSUER_ACCOUNT?.trim() ?? 
 export const TOKEN_ASSET_CODE = process.env.NEXT_PUBLIC_TOKEN_ASSET_CODE?.trim() ?? "";
 export const TOKEN_ASSET_ISSUER = process.env.NEXT_PUBLIC_TOKEN_ASSET_ISSUER?.trim() ?? "";
 
+const bridgeAccountCandidate = (
+  process.env.BRIDGE_ACCOUNT ??
+  process.env.NEXT_PUBLIC_BRIDGE_ACCOUNT ??
+  ""
+) as string;
+
+const trimmedBridgeAccount = bridgeAccountCandidate.trim();
+const trimmedPublicBridgeAccount = (process.env.NEXT_PUBLIC_BRIDGE_ACCOUNT ?? trimmedBridgeAccount).trim();
+const rawBridgeNetwork = (process.env.NEXT_PUBLIC_BRIDGE_NETWORK ?? "").trim();
+
+export const BRIDGE_ACCOUNT = trimmedBridgeAccount;
+export const BRIDGE_PUBLIC_ACCOUNT = trimmedPublicBridgeAccount;
+export const BRIDGE_NETWORK = rawBridgeNetwork || "TESTNET";
+
+export const SUSD_PUBLIC_CODE = (process.env.NEXT_PUBLIC_SUSD_CODE ?? "").trim();
+export const SUSD_PUBLIC_ISSUER = (process.env.NEXT_PUBLIC_SUSD_ISSUER ?? "").trim();
+export const USDC_ISSUER = (process.env.NEXT_PUBLIC_USDC_ISSUER ?? "").trim();
+
+const bridgeEnvMissing = [] as string[];
+if (!BRIDGE_PUBLIC_ACCOUNT) bridgeEnvMissing.push("NEXT_PUBLIC_BRIDGE_ACCOUNT");
+if (!SUSD_PUBLIC_CODE) bridgeEnvMissing.push("NEXT_PUBLIC_SUSD_CODE");
+if (!SUSD_PUBLIC_ISSUER) bridgeEnvMissing.push("NEXT_PUBLIC_SUSD_ISSUER");
+if (!USDC_ISSUER) bridgeEnvMissing.push("NEXT_PUBLIC_USDC_ISSUER");
+
+export const isBridgeEnvConfigured = bridgeEnvMissing.length === 0;
+export const getBridgeEnvDiagnostics = () => ({ missing: [...bridgeEnvMissing] });
+
 const spvAccountCandidate = (
   process.env.SPV_ACCOUNT ??
   process.env.NEXT_PUBLIC_SPV_ACCOUNT ??
@@ -59,8 +86,16 @@ if (!spvAccountCandidate) {
 }
 
 const publicSpvAccountCandidate = (process.env.NEXT_PUBLIC_SPV_ACCOUNT ?? spvAccountCandidate).trim() || spvAccountCandidate;
-const susdAssetCode = (process.env.SUSD_ASSET_CODE ?? "").trim();
-const susdIssuer = (process.env.SUSD_ISSUER ?? "").trim();
+const susdAssetCode = (
+  process.env.SUSD_ASSET_CODE ??
+  process.env.NEXT_PUBLIC_SUSD_CODE ??
+  ""
+).trim();
+const susdIssuer = (
+  process.env.SUSD_ISSUER ??
+  process.env.NEXT_PUBLIC_SUSD_ISSUER ??
+  ""
+).trim();
 const spvSignerConfigured = (process.env.SPV_SIGNER_SECRET ?? "").trim().length > 0;
 
 export const getSpvAccount = (): string => publicSpvAccountCandidate;

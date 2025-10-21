@@ -1,388 +1,832 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { motion, useReducedMotion } from "framer-motion";
-import { transitions, fadeInUp } from "@/src/components/motion/presets";
+import Link from "next/link";
 import { LayoutShell } from "@/src/components/layout/LayoutShell";
 import { useWallet } from "@/src/hooks/useWallet";
 import { useNetworkHealth } from "@/src/hooks/useNetworkHealth";
 import { useToast } from "@/src/components/ui/Toast";
-import { NetworkMismatch } from "@/src/components/bridge/NetworkMismatch";
-import { TotalLockedMini } from "@/src/components/bridge/TotalLockedMini";
-import { ProgressModal } from "@/src/components/bridge/ProgressModal";
-import { isValidEth, isValidStellar } from "@/src/components/bridge/validators";
-import { CopyHash } from "@/src/components/ui/CopyHash";
+import { Button } from "@/components/ui/button";
 import { Loader } from "@/src/components/ui/Loader";
-import { formatNumber } from "@/src/lib/utils/format";
-import type { BridgeTx, Chain } from "@/src/lib/types/proofs";
+import { Skeleton } from "@/src/components/ui/Skeleton";
+import { CopyHash } from "@/src/components/ui/CopyHash";
+import {
+  useBridgeLocks,
+  useBridgeMints,
+  useBridgeRedeems,
+  useBridgeStats,
+} from "@/src/hooks/useBridge";
+import {
+  refreshBridgeAll,
+  refreshDashboardAll,
+  refreshProofsAll,
+} from "@/src/lib/swr/mutateBus";
+import type { BridgeLock, BridgeMint, BridgeRedeem } from "@/src/lib/types/bridge";
+import {
+  formatDateTime,
+  formatNumber,
+  shortAddress,
+  shortHash,
+} from "@/src/lib/utils/format";
+import {
+  BRIDGE_PUBLIC_ACCOUNT,
+  IPFS_GATEWAY,
+  STELLAR_NET,
+  SUSD_PUBLIC_CODE,
+  SUSD_PUBLIC_ISSUER,
+  isBridgeEnvConfigured,
+  getBridgeEnvDiagnostics,
+} from "@/src/utils/constants";
 
-const chains: Chain[] = ["Stellar", "Ethereum", "Solana"];
+type TabKey = "locks" | "mints" | "redeems";
 
-const tokensByChain: Record<Chain, Array<{ symbol: string; name: string; balance: number }>> = {
-  Stellar: [
-    { symbol: "XLM", name: "Stellar Lumens", balance: 1240.5 },
-    { symbol: "USDC", name: "USD Coin", balance: 560.0 },
-    { symbol: "vRWA", name: "Vesto RWA", balance: 92.4 },
-  ],
-  Ethereum: [
-    { symbol: "ETH", name: "Ethereum", balance: 0.82 },
-    { symbol: "USDC", name: "USD Coin", balance: 845.6 },
-    { symbol: "vRWA", name: "Vesto RWA", balance: 33.2 },
-  ],
-  Solana: [
-    { symbol: "SOL", name: "Solana", balance: 14.2 },
-    { symbol: "USDC", name: "USD Coin", balance: 300.0 },
-  ],
-};
-
-const lockedSeries = [
-  { date: "2024-01-09", lockedUSD: 482000 },
-  { date: "2024-01-10", lockedUSD: 486200 },
-  { date: "2024-01-11", lockedUSD: 491500 },
-  { date: "2024-01-12", lockedUSD: 497800 },
-  { date: "2024-01-13", lockedUSD: 503200 },
-  { date: "2024-01-14", lockedUSD: 508400 },
-  { date: "2024-01-15", lockedUSD: 515000 },
+const TABS: Array<{ key: TabKey; label: string }> = [
+  { key: "locks", label: "Locks" },
+  { key: "mints", label: "Mints" },
+  { key: "redeems", label: "Redeems" },
 ];
 
-const explorerByChain: Record<Chain, string> = {
-  Stellar: "https://stellar.expert/explorer/public/tx/",
-  Ethereum: "https://etherscan.io/tx/",
-  Solana: "https://solscan.io/tx/",
+const debugEnabled = process.env.NEXT_PUBLIC_DEBUG === "1";
+
+const explorerBase =
+  STELLAR_NET?.toLowerCase() === "mainnet"
+    ? "https://stellar.expert/explorer/public/tx/"
+    : "https://stellar.expert/explorer/testnet/tx/";
+
+const toExplorerUrl = (hash: string) => `${explorerBase}${hash}`;
+const toMetadataUrl = (cid: string) => `${IPFS_GATEWAY}/${cid}`;
+
+const formatFee = (fee: number | undefined) => {
+  if (!fee || !Number.isFinite(fee)) return "0.0000000";
+  return fee.toFixed(7);
 };
 
-const historyMock: BridgeTx[] = [
-  {
-    id: "BR-001",
-    chainFrom: "Stellar",
-    chainTo: "Ethereum",
-    asset: "USDC",
-    amount: 150,
-    hash: "0x7f9a4d2c9b01e8f6c3b2c19642a1ff13fbc2af76",
-    status: "completed",
-    ts: "2024-01-15T14:30:00.000Z",
-    explorer: `${explorerByChain.Ethereum}0x7f9a4d2c9b01e8f6c3b2c19642a1ff13fbc2af76`,
-  },
-  {
-    id: "BR-002",
-    chainFrom: "Ethereum",
-    chainTo: "Stellar",
-    asset: "vRWA",
-    amount: 45,
-    hash: "0x8d2e5a1f3b2e1c4a6d7e8f9b0c1d2e3f4a5b6c7d",
-    status: "pending",
-    ts: "2024-01-15T12:15:00.000Z",
-    explorer: `${explorerByChain.Ethereum}0x8d2e5a1f3b2e1c4a6d7e8f9b0c1d2e3f4a5b6c7d`,
-  },
-  {
-    id: "BR-003",
-    chainFrom: "Stellar",
-    chainTo: "Solana",
-    asset: "XLM",
-    amount: 520,
-    hash: "0x3c7b9d4e2a1c5f6d7e8f9b0c1d2e3f4a5b6c7d8e",
-    status: "failed",
-    ts: "2024-01-14T18:45:00.000Z",
-    explorer: `${explorerByChain.Stellar}3c7b9d4e2a1c5f6d7e8f9b0c1d2e3f4a5b6c7d8e`,
-  },
-];
-
-const statusStyles: Record<BridgeTx["status"], string> = {
-  completed: "bg-emerald-500/15 text-emerald-300",
-  pending: "bg-amber-500/15 text-amber-200",
-  failed: "bg-rose-500/15 text-rose-300",
+const defaultStats = {
+  totalLockedXlm: "0.0000000",
+  totalMintedSusd: "0.0000000",
+  totalRedeemedSusd: "0.0000000",
+  ops7d: 0,
+  ops30d: 0,
 };
 
-const formatDirection = (from: Chain, to: Chain) => `${from} → ${to}`;
+const SectionCard = ({ title, value, subtitle }: { title: string; value: string; subtitle?: string }) => (
+  <div className="rounded-2xl border border-border/40 bg-card/60 px-4 py-5">
+    <p className="text-xs uppercase tracking-wide text-muted-foreground">{title}</p>
+    <p className="mt-2 text-2xl font-semibold text-foreground">{value}</p>
+    {subtitle ? <p className="mt-1 text-xs text-muted-foreground">{subtitle}</p> : null}
+  </div>
+);
 
-const validateAddress = (chain: Chain, value: string) => {
-  if (!value) return false;
-  if (chain === "Ethereum") return isValidEth(value);
-  if (chain === "Stellar") return isValidStellar(value);
-  return value.trim().length >= 32;
+const BadgeLabel = ({ tone, children }: { tone: "lock" | "mint" | "redeem"; children: string }) => {
+  const palette =
+    tone === "lock"
+      ? "bg-sky-500/15 text-sky-300"
+      : tone === "mint"
+        ? "bg-emerald-500/15 text-emerald-300"
+        : "bg-amber-500/15 text-amber-200";
+  return <span className={`rounded-full px-3 py-1 text-xs font-semibold uppercase ${palette}`}>{children}</span>;
 };
 
-export default function BridgePage() {
+const StatusBadge = ({ status }: { status: "Verified" | "Recorded" | "Invalid" }) => {
+  const palette =
+    status === "Verified"
+      ? "bg-emerald-500/15 text-emerald-300"
+      : status === "Recorded"
+        ? "bg-amber-500/15 text-amber-200"
+        : "bg-rose-500/15 text-rose-300";
+  return <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${palette}`}>{status}</span>;
+};
+
+const DataRow = ({
+  label,
+  value,
+}: {
+  label: string;
+  value: string;
+}) => (
+  <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+    <span className="font-medium uppercase tracking-wide">{label}</span>
+    <span className="font-mono text-foreground/90">{value}</span>
+  </div>
+);
+
+const ActionLink = ({ href, label }: { href: string; label: string }) => (
+  <Link
+    href={href}
+    target="_blank"
+    rel="noreferrer"
+    className="text-xs font-semibold text-primary transition hover:text-primary/80"
+  >
+    {label}
+  </Link>
+);
+
+type BridgeListItemProps = {
+  variant: "lock" | "mint" | "redeem";
+  status: "Verified" | "Recorded" | "Invalid";
+  memoHashHex?: string;
+  feeXlm?: number;
+  sigs?: number;
+  account?: string;
+  createdAt?: string;
+  amount?: string;
+  assetLabel?: string;
+  subtitle?: string;
+  metadataCid: string;
+  proofCid?: string;
+  txHash: string;
+  metadataError?: string;
+};
+
+const BridgeListItem = ({
+  variant,
+  status,
+  memoHashHex,
+  feeXlm,
+  sigs,
+  account,
+  createdAt,
+  amount,
+  assetLabel,
+  subtitle,
+  metadataCid,
+  proofCid,
+  txHash,
+  metadataError,
+}: BridgeListItemProps) => (
+  <li className="flex flex-col gap-3 rounded-2xl border border-border/40 bg-card/60 p-4">
+    <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <BadgeLabel tone={variant}>{variant.toUpperCase()}</BadgeLabel>
+        <StatusBadge status={status} />
+        {amount ? (
+          <span className="text-sm font-semibold text-foreground">
+            {formatNumber(Number.parseFloat(amount), 2)} {assetLabel ?? ""}
+          </span>
+        ) : null}
+      </div>
+      <div className="flex items-center gap-3">
+        <ActionLink href={toExplorerUrl(txHash)} label="Open in StellarExpert" />
+        <ActionLink href={toMetadataUrl(metadataCid)} label="Open metadata" />
+        {proofCid ? <ActionLink href={toMetadataUrl(proofCid)} label="Open proof" /> : null}
+      </div>
+    </div>
+    {subtitle ? <p className="text-sm text-muted-foreground">{subtitle}</p> : null}
+    {metadataError && status !== "Verified" ? (
+      <p className="text-xs text-rose-300">
+        Metadata: {metadataError}
+      </p>
+    ) : null}
+    <div className="flex flex-wrap items-center gap-4 text-xs text-muted-foreground">
+      {memoHashHex ? <DataRow label="Memo" value={shortHash(memoHashHex, 6, 6)} /> : null}
+      <DataRow label="Fee" value={`${formatFee(feeXlm)} XLM`} />
+      <DataRow
+        label="Signed by"
+        value={`${shortAddress(account ?? BRIDGE_PUBLIC_ACCOUNT)} • ${sigs ?? 0} sig`}
+      />
+      <DataRow label="Recorded" value={createdAt ? formatDateTime(createdAt) : "—"} />
+    </div>
+  </li>
+);
+
+const useSubmittingState = () => {
+  const [isSubmitting, setSubmitting] = useState(false);
+  const wrap = async (callback: () => Promise<void>) => {
+    if (isSubmitting) return;
+    setSubmitting(true);
+    try {
+      await callback();
+    } finally {
+      setSubmitting(false);
+    }
+  };
+  return { isSubmitting, wrap };
+};
+
+const BridgePage = () => {
   const wallet = useWallet();
   const networkHealth = useNetworkHealth();
   const { toast } = useToast();
-  const prefersReducedMotion = useReducedMotion();
+  const bridgeConfigured = isBridgeEnvConfigured;
+  const missingBridgeEnv = bridgeConfigured ? [] : getBridgeEnvDiagnostics().missing;
 
-  const [fromChain, setFromChain] = useState<Chain>("Stellar");
-  const [toChain, setToChain] = useState<Chain>("Ethereum");
-  const [token, setToken] = useState<string>("");
-  const [amount, setAmount] = useState<string>("");
-  const [recipientAddress, setRecipientAddress] = useState<string>("");
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [isModalOpen, setModalOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState<TabKey>("locks");
 
-  const walletChain: Chain | null = wallet.status === "connected" ? "Stellar" : null;
+  const [lockAmount, setLockAmount] = useState("");
+  const [lockAsset, setLockAsset] = useState<"XLM" | "SUSD">("XLM");
+  const [lockRecipient, setLockRecipient] = useState("");
 
-  const addressValid = useMemo(
-    () => validateAddress(toChain, recipientAddress),
-    [recipientAddress, toChain],
-  );
+  const [mintAmount, setMintAmount] = useState("");
+  const [mintTarget, setMintTarget] = useState("");
+  const [mintProofCid, setMintProofCid] = useState("");
 
-  const amountValue = Number.parseFloat(amount);
-  const canSubmit =
-    wallet.status === "connected" &&
-    token !== "" &&
-    amountValue > 0 &&
-    !Number.isNaN(amountValue) &&
-    addressValid &&
-    !isSubmitting;
+  const [redeemAmount, setRedeemAmount] = useState("");
+  const [redeemRecipient, setRedeemRecipient] = useState("");
 
-  const sameChain = fromChain === toChain;
+  const lockSubmit = useSubmittingState();
+  const mintSubmit = useSubmittingState();
+  const redeemSubmit = useSubmittingState();
 
-  const handleSwap = () => {
-    setFromChain(toChain);
-    setToChain(fromChain);
-    setToken("");
-  };
+  const {
+    data: locks,
+    isLoading: locksLoading,
+    error: locksError,
+  } = useBridgeLocks();
+  const {
+    data: mints,
+    isLoading: mintsLoading,
+    error: mintsError,
+  } = useBridgeMints();
+  const {
+    data: redeems,
+    isLoading: redeemsLoading,
+    error: redeemsError,
+  } = useBridgeRedeems();
+  const { data: stats, isLoading: statsLoading } = useBridgeStats();
 
-  const handleBridge = () => {
-    if (!canSubmit) {
-      toast({
-        title: "Check details",
-        description: "Complete all fields before bridging",
-        variant: "error",
-      });
-      return;
+  const currentList = useMemo(() => {
+    switch (activeTab) {
+      case "mints":
+        return mints ?? [];
+      case "redeems":
+        return redeems ?? [];
+      case "locks":
+      default:
+        return locks ?? [];
+    }
+  }, [activeTab, locks, mints, redeems]);
+
+  const statsData = stats ?? defaultStats;
+
+  const handleLockSubmit = () =>
+    lockSubmit.wrap(async () => {
+      if (!bridgeConfigured) {
+        toast({
+          title: "Bridge not configured",
+          description: "Set the NEXT_PUBLIC_* bridge environment variables to enable locking.",
+          variant: "warning",
+        });
+        return;
+      }
+      if (!lockAmount || Number.isNaN(Number.parseFloat(lockAmount))) {
+        toast({
+          title: "Check amount",
+          description: "Specify the amount to lock.",
+          variant: "error",
+        });
+        return;
+      }
+      if (!lockRecipient.trim()) {
+        toast({
+          title: "Recipient required",
+          description: "Provide the destination EVM address.",
+          variant: "error",
+        });
+        return;
+      }
+      try {
+        const response = await fetch("/api/bridge/lock", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            amount: lockAmount,
+            asset: lockAsset,
+            recipient: lockRecipient,
+            chain: "EVM",
+          }),
+        });
+        const json = (await response.json()) as
+          | { hash: string; cid: string; memoHashHex: string }
+          | { error: { code?: string; message?: string; hint?: string } };
+        if (!response.ok || "error" in json) {
+          const err = "error" in json ? json.error : undefined;
+          toast({
+            title: "Lock failed",
+            description: err?.hint ?? err?.message ?? "Unable to submit lock transaction.",
+            variant: "error",
+          });
+          return;
+        }
+        toast({
+          title: "Lock submitted",
+          description: `Tx ${shortHash(json.hash, 6, 6)} anchored.`,
+          variant: "success",
+        });
+        setLockAmount("");
+        setLockRecipient("");
+        if (json.cid) {
+          setMintProofCid(json.cid);
+        }
+        await refreshBridgeAll();
+        await refreshProofsAll();
+        await refreshDashboardAll();
+      } catch (error) {
+        console.error("[bridge:lock]", error);
+        toast({
+          title: "Lock failed",
+          description: "Unexpected error while submitting lock.",
+          variant: "error",
+        });
+      }
+    });
+
+  const handleMintSubmit = () =>
+    mintSubmit.wrap(async () => {
+      if (!bridgeConfigured) {
+        toast({
+          title: "Bridge not configured",
+          description: "Configure bridge environment variables before minting.",
+          variant: "warning",
+        });
+        return;
+      }
+      if (!mintAmount || Number.isNaN(Number.parseFloat(mintAmount))) {
+        toast({
+          title: "Check amount",
+          description: "Specify the amount to mint.",
+          variant: "error",
+        });
+        return;
+      }
+      if (!mintTarget.trim()) {
+        toast({
+          title: "Target required",
+          description: "Provide the Stellar account to receive SUSD.",
+          variant: "error",
+        });
+        return;
+      }
+      if (!mintProofCid.trim()) {
+        toast({
+          title: "Proof CID required",
+          description: "Enter the CID from the corresponding lock proof.",
+          variant: "error",
+        });
+        return;
+      }
+      try {
+        const response = await fetch("/api/bridge/mint", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            amount: mintAmount,
+            targetAccount: mintTarget,
+            evmLockProofCid: mintProofCid,
+            lockProofCid: mintProofCid,
+          }),
+        });
+        const json = (await response.json()) as
+          | { hash: string; cid: string; memoHashHex: string }
+          | { error: { code?: string; message?: string; hint?: string } };
+        if (!response.ok || "error" in json) {
+          const err = "error" in json ? json.error : undefined;
+          toast({
+            title: "Mint failed",
+            description: err?.hint ?? err?.message ?? "Unable to submit mint transaction.",
+            variant: "error",
+          });
+          return;
+        }
+        toast({
+          title: "Mint submitted",
+          description: `Tx ${shortHash(json.hash, 6, 6)} recorded.`,
+          variant: "success",
+        });
+        setMintAmount("");
+        setMintTarget("");
+        setMintProofCid("");
+        await refreshBridgeAll();
+        await refreshProofsAll();
+        await refreshDashboardAll();
+      } catch (error) {
+        console.error("[bridge:mint]", error);
+        toast({
+          title: "Mint failed",
+          description: "Unexpected error while submitting mint.",
+          variant: "error",
+        });
+      }
+    });
+
+  const handleRedeemSubmit = () =>
+    redeemSubmit.wrap(async () => {
+      if (!bridgeConfigured) {
+        toast({
+          title: "Bridge not configured",
+          description: "Configure bridge environment variables before redeeming.",
+          variant: "warning",
+        });
+        return;
+      }
+      if (!redeemAmount || Number.isNaN(Number.parseFloat(redeemAmount))) {
+        toast({
+          title: "Check amount",
+          description: "Specify the amount to redeem.",
+          variant: "error",
+        });
+        return;
+      }
+      if (!redeemRecipient.trim()) {
+        toast({
+          title: "Recipient required",
+          description: "Provide the EVM recipient for redemption.",
+          variant: "error",
+        });
+        return;
+      }
+      try {
+        const response = await fetch("/api/bridge/redeem", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            amount: redeemAmount,
+            evmRecipient: redeemRecipient,
+          }),
+        });
+        const json = (await response.json()) as
+          | { hash: string; cid: string; memoHashHex: string }
+          | { error: { code?: string; message?: string; hint?: string } };
+        if (!response.ok || "error" in json) {
+          const err = "error" in json ? json.error : undefined;
+          toast({
+            title: "Redeem failed",
+            description: err?.hint ?? err?.message ?? "Unable to submit redeem transaction.",
+            variant: "error",
+          });
+          return;
+        }
+        toast({
+          title: "Redeem submitted",
+          description: `Tx ${shortHash(json.hash, 6, 6)} recorded.`,
+          variant: "success",
+        });
+        setRedeemAmount("");
+        setRedeemRecipient("");
+        await refreshBridgeAll();
+        await refreshProofsAll();
+        await refreshDashboardAll();
+      } catch (error) {
+        console.error("[bridge:redeem]", error);
+        toast({
+          title: "Redeem failed",
+          description: "Unexpected error while submitting redeem request.",
+          variant: "error",
+        });
+      }
+    });
+
+  const renderList = () => {
+    if (locksError || mintsError || redeemsError) {
+      return (
+        <div className="rounded-2xl border border-border/40 bg-border/10 p-6 text-sm text-rose-300">
+          Failed to load bridge history. Refresh the page to retry.
+        </div>
+      );
+    }
+    if (locksLoading || mintsLoading || redeemsLoading) {
+      return (
+        <div className="space-y-3">
+          <Skeleton className="h-20 w-full rounded-2xl" />
+          <Skeleton className="h-20 w-full rounded-2xl" />
+        </div>
+      );
+    }
+    if (!currentList.length) {
+      return (
+        <div className="rounded-2xl border border-border/40 bg-border/10 p-6 text-sm text-muted-foreground">
+          No {activeTab} recorded yet. Submit a {activeTab.slice(0, -1)} request to populate the timeline.
+        </div>
+      );
     }
 
-    setIsSubmitting(true);
-    toast({
-      title: "Bridge initiated",
-      description: `Moving ${amount} ${token} from ${fromChain} to ${toChain}`,
-      variant: "info",
-    });
-    setModalOpen(true);
-    setTimeout(() => {
-      setIsSubmitting(false);
-      setAmount("");
-      setRecipientAddress("");
-    }, 600);
+    return (
+      <ul className="space-y-3">
+        {currentList.map((item) => {
+          if (activeTab === "locks") {
+            const record = item as BridgeLock;
+            return (
+              <BridgeListItem
+                key={record.id}
+                variant="lock"
+                status={record.status}
+                memoHashHex={record.memoHashHex}
+                feeXlm={record.feeXlm}
+                sigs={record.sigs}
+                account={record.account}
+                createdAt={record.createdAt}
+                amount={record.amount}
+                assetLabel={record.asset}
+                subtitle={`Recipient · ${record.recipient}`}
+                metadataCid={record.proofCid}
+                proofCid={record.proofCid}
+                txHash={record.id}
+                metadataError={record.metadataError}
+              />
+            );
+          }
+          if (activeTab === "mints") {
+            const record = item as BridgeMint;
+            return (
+              <BridgeListItem
+                key={record.id}
+                variant="mint"
+                status={record.status}
+                memoHashHex={record.memoHashHex}
+                feeXlm={record.feeXlm}
+                sigs={record.sigs}
+                account={BRIDGE_PUBLIC_ACCOUNT}
+                createdAt={record.createdAt}
+                amount={record.amount}
+                assetLabel="SUSD"
+                subtitle={`Target · ${record.targetAccount}`}
+                metadataCid={record.proofCid}
+                proofCid={record.proofCid}
+                txHash={record.id}
+                metadataError={record.metadataError}
+              />
+            );
+          }
+          const record = item as BridgeRedeem;
+          return (
+            <BridgeListItem
+              key={record.id}
+              variant="redeem"
+              status={record.status}
+              memoHashHex={record.memoHashHex}
+              feeXlm={record.feeXlm}
+              sigs={record.sigs}
+              account={BRIDGE_PUBLIC_ACCOUNT}
+              createdAt={record.createdAt}
+              amount={record.amount}
+              assetLabel="SUSD"
+              subtitle={`Recipient · ${record.recipient || "Pending metadata fetch"}`}
+              metadataCid={record.proofCid}
+              proofCid={record.proofCid}
+              txHash={record.id}
+              metadataError={record.metadataError}
+            />
+          );
+        })}
+      </ul>
+    );
   };
-
-  const variants = prefersReducedMotion
-    ? { hidden: { opacity: 0 }, visible: { opacity: 1 } }
-    : fadeInUp;
-
-  const tokens = tokensByChain[fromChain];
 
   return (
     <LayoutShell wallet={wallet} networkHealth={networkHealth}>
-      <motion.div
-        initial={prefersReducedMotion ? undefined : "hidden"}
-        animate="visible"
-        variants={variants}
-        transition={transitions.base}
-        className="container mx-auto px-4 py-8"
-      >
+      <div className="container mx-auto px-4 py-8">
         <header className="mb-8 space-y-2">
-          <h1 className="text-3xl font-bold text-foreground">Cross-Chain Bridge</h1>
+          <h1 className="text-3xl font-bold text-foreground">Bridge Control Center</h1>
           <p className="text-muted-foreground">
-            Transfer assets between Stellar, Ethereum, and Solana while keeping full custody visibility.
+            Lock XLM or SUSD, mint synthetic SUSD, and redeem back to EVM with full on-chain auditability.
           </p>
         </header>
 
-        <ProgressModal open={isModalOpen} onClose={() => setModalOpen(false)} />
-
-        <div className="grid gap-6 lg:grid-cols-[minmax(0,2fr),minmax(0,1fr)]">
-          <motion.section
-            variants={variants}
-            className="rounded-2xl border border-border/60 bg-card/60 p-6 backdrop-blur"
-          >
-            <header className="flex items-start justify-between gap-3">
-              <div>
-                <h2 className="text-xl font-semibold">Bridge Assets</h2>
-                <p className="text-sm text-muted-foreground">
-                  Choose source and destination networks, then confirm the recipient address.
-                </p>
-              </div>
-              {isSubmitting ? <Loader size="sm" className="text-primary" /> : null}
-            </header>
-
-            <div className="mt-5 space-y-5">
-              <NetworkMismatch
-                walletChain={walletChain}
-                selectedChain={fromChain}
-                onSwitch={() => toast({
-                  title: "Switch network",
-                  description: "Network switching is simulated in this demo.",
-                  variant: "info",
-                })}
-              />
-
-              <div className="space-y-3">
-                <label className="text-sm font-medium text-foreground/90">From</label>
-                <div className="grid gap-3 sm:grid-cols-[minmax(0,160px),1fr]">
-                  <select
-                    value={fromChain}
-                    onChange={(event) => {
-                      const next = event.target.value as Chain;
-                      setFromChain(next);
-                      setToken("");
-                    }}
-                    className="rounded-lg border border-border/50 bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
-                  >
-                    {chains.map((chain) => (
-                      <option key={chain} value={chain}>
-                        {chain}
-                      </option>
-                    ))}
-                  </select>
-                  <select
-                    value={token}
-                    onChange={(event) => setToken(event.target.value)}
-                    className="rounded-lg border border-border/50 bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
-                  >
-                    <option value="">Select token</option>
-                    {tokens.map((item) => (
-                      <option key={item.symbol} value={item.symbol}>
-                        {item.symbol} • {item.name} (Balance: {formatNumber(item.balance, 2)})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <input
-                  type="number"
-                  inputMode="decimal"
-                  min="0"
-                  step="any"
-                  value={amount}
-                  onChange={(event) => setAmount(event.target.value)}
-                  placeholder="0.00"
-                  className="w-full rounded-lg border border-border/50 bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
-                />
-              </div>
-
-              <div className="flex justify-center">
-                <button
-                  type="button"
-                  onClick={handleSwap}
-                  className="rounded-full border border-border/50 bg-background/60 p-2 text-muted-foreground transition hover:border-primary/50 hover:text-primary"
-                  aria-label="Swap networks"
-                >
-                  <svg className="h-5 w-5" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.6">
-                    <path d="M5 6h10M5 6l2-2m-2 2l2 2" strokeLinecap="round" strokeLinejoin="round" />
-                    <path d="M15 14H5m10 0l-2 2m2-2l-2-2" strokeLinecap="round" strokeLinejoin="round" />
-                  </svg>
-                </button>
-              </div>
-
-              <div className="space-y-3">
-                <label className="text-sm font-medium text-foreground/90">To</label>
-                <div className="grid gap-3 sm:grid-cols-[minmax(0,160px),1fr]">
-                  <select
-                    value={toChain}
-                    onChange={(event) => setToChain(event.target.value as Chain)}
-                    className="rounded-lg border border-border/50 bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
-                  >
-                    {chains.map((chain) => (
-                      <option key={chain} value={chain}>
-                        {chain}
-                      </option>
-                    ))}
-                  </select>
-                  <input
-                    type="text"
-                    value={recipientAddress}
-                    onChange={(event) => setRecipientAddress(event.target.value)}
-                    placeholder={`Recipient ${toChain} address`}
-                    className="w-full rounded-lg border border-border/50 bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
-                  />
-                </div>
-                {!addressValid && recipientAddress ? (
-                  <p className="text-xs text-rose-400">
-                    {toChain === "Ethereum" && "Enter a valid Ethereum address (0x...)"}
-                    {toChain === "Stellar" && "Enter a valid Stellar public key (starts with G)"}
-                    {toChain === "Solana" && "Enter a valid Solana address (32+ characters)"}
-                  </p>
-                ) : null}
-                {sameChain ? (
-                  <p className="text-xs text-muted-foreground">Same-chain transfer (no bridge).</p>
-                ) : null}
-              </div>
-
-              <div className="rounded-lg border border-border/40 bg-background/40 p-4 text-sm">
-                <div className="flex items-center justify-between">
-                  <span>Bridge fee</span>
-                  <span>0.10%</span>
-                </div>
-                <div className="mt-2 flex items-center justify-between">
-                  <span>Estimated time</span>
-                  <span>10-15 minutes</span>
-                </div>
-                <div className="mt-2 flex items-center justify-between font-medium">
-                  <span>You receive</span>
-                  <span>
-                    {amount && !Number.isNaN(amountValue) ? `${amount} ${token || "—"}` : "—"}
-                  </span>
-                </div>
-              </div>
-
-              <button
-                type="button"
-                onClick={handleBridge}
-                disabled={!canSubmit}
-                className="w-full rounded-lg bg-primary px-4 py-3 text-sm font-semibold text-primary-foreground transition hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {isSubmitting ? "Processing" : wallet.status === "connected" ? "Bridge Assets" : "Connect Wallet First"}
-              </button>
+        <section className="mb-8 grid gap-4 md:grid-cols-4">
+          <div className="rounded-2xl border border-border/40 bg-card/60 px-4 py-5">
+            <p className="text-xs uppercase tracking-wide text-muted-foreground">Bridge Account</p>
+            <div className="mt-2 text-sm text-foreground">
+              {bridgeConfigured && BRIDGE_PUBLIC_ACCOUNT ? (
+                <CopyHash value={BRIDGE_PUBLIC_ACCOUNT} />
+              ) : (
+                <span className="text-xs text-muted-foreground">Set NEXT_PUBLIC_BRIDGE_ACCOUNT</span>
+              )}
             </div>
-          </motion.section>
+            <p className="mt-1 text-xs text-muted-foreground">Server-signed operations originate from this account.</p>
+          </div>
+          <SectionCard
+            title="Locked (XLM)"
+            value={`${statsData.totalLockedXlm}`}
+            subtitle="Aggregate locks recorded on chain"
+          />
+          <SectionCard
+            title="Minted (SUSD)"
+            value={`${statsData.totalMintedSusd}`}
+            subtitle={`Issuer · ${SUSD_PUBLIC_CODE}/${shortAddress(SUSD_PUBLIC_ISSUER)}`}
+          />
+          <SectionCard
+            title="Ops (7d / 30d)"
+            value={`${statsData.ops7d} / ${statsData.ops30d}`}
+            subtitle="Recent bridge activity windows"
+          />
+        </section>
 
-          <motion.aside
-            variants={variants}
-            className="space-y-6"
+        {!bridgeConfigured ? (
+          <section className="mb-6 rounded-2xl border border-amber-500/40 bg-amber-500/10 p-4 text-sm text-amber-100" role="alert">
+            <p className="font-semibold uppercase tracking-wide">Bridge configuration required</p>
+            <p className="mt-1">
+              Provide the following environment variables to enable bridge operations:
+              {" "}
+              <span className="font-mono">{missingBridgeEnv.join(", ") || "(none)"}</span>.
+            </p>
+            <p className="mt-1 text-xs text-amber-200">Pages remain accessible, but Lock/Mint/Redeem will stay disabled until configuration is complete.</p>
+          </section>
+        ) : null}
+
+        <section className="mb-10 grid gap-6 lg:grid-cols-3">
+          <form
+            className="flex flex-col gap-4 rounded-2xl border border-border/40 bg-card/60 p-5"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void handleLockSubmit();
+            }}
           >
-            <TotalLockedMini data={lockedSeries} />
+            <div>
+              <h2 className="text-lg font-semibold text-foreground">Lock assets (Stellar → EVM)</h2>
+              <p className="text-xs text-muted-foreground">Anchor a lock intent and publish metadata to IPFS.</p>
+            </div>
+            <div className="space-y-2">
+              <label className="text-xs font-semibold uppercase text-muted-foreground">Asset</label>
+              <select
+                value={lockAsset}
+                onChange={(event) => setLockAsset(event.target.value as "XLM" | "SUSD")}
+                className="w-full rounded-xl border border-border/40 bg-background/60 px-3 py-2 text-sm text-foreground focus:border-primary focus:outline-none"
+              >
+                <option value="XLM">XLM</option>
+                <option value="SUSD">SUSD</option>
+              </select>
+            </div>
+            <div className="space-y-2">
+              <label className="text-xs font-semibold uppercase text-muted-foreground">Amount</label>
+              <input
+                type="number"
+                step="0.0000001"
+                min="0"
+                value={lockAmount}
+                onChange={(event) => setLockAmount(event.target.value)}
+                placeholder="0.0"
+                className="w-full rounded-xl border border-border/40 bg-background/60 px-3 py-2 text-sm text-foreground focus:border-primary focus:outline-none"
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-xs font-semibold uppercase text-muted-foreground">EVM recipient</label>
+              <input
+                type="text"
+                value={lockRecipient}
+                onChange={(event) => setLockRecipient(event.target.value)}
+                placeholder="0x..."
+                className="w-full rounded-xl border border-border/40 bg-background/60 px-3 py-2 text-sm text-foreground focus:border-primary focus:outline-none"
+              />
+            </div>
+            <Button type="submit" disabled={lockSubmit.isSubmitting || !bridgeConfigured}>
+              {lockSubmit.isSubmitting ? <Loader /> : "Lock"}
+            </Button>
+          </form>
 
-            <section className="rounded-2xl border border-border/60 bg-card/60 p-6 backdrop-blur">
-              <h2 className="text-lg font-semibold text-foreground">Recent Transactions</h2>
-              <p className="text-sm text-muted-foreground">Latest bridge activity across chains.</p>
+          <form
+            className="flex flex-col gap-4 rounded-2xl border border-border/40 bg-card/60 p-5"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void handleMintSubmit();
+            }}
+          >
+            <div>
+              <h2 className="text-lg font-semibold text-foreground">Mint SUSD (EVM → Stellar)</h2>
+              <p className="text-xs text-muted-foreground">Link an EVM proof CID and mint synthetic SUSD on Stellar.</p>
+            </div>
+            <div className="space-y-2">
+              <label className="text-xs font-semibold uppercase text-muted-foreground">Amount</label>
+              <input
+                type="number"
+                step="0.0000001"
+                min="0"
+                value={mintAmount}
+                onChange={(event) => setMintAmount(event.target.value)}
+                placeholder="0.0"
+                className="w-full rounded-xl border border-border/40 bg-background/60 px-3 py-2 text-sm text-foreground focus:border-primary focus:outline-none"
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-xs font-semibold uppercase text-muted-foreground">Target account (GA…)</label>
+              <input
+                type="text"
+                value={mintTarget}
+                onChange={(event) => setMintTarget(event.target.value)}
+                placeholder="GA..."
+                className="w-full rounded-xl border border-border/40 bg-background/60 px-3 py-2 text-sm text-foreground focus:border-primary focus:outline-none"
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-xs font-semibold uppercase text-muted-foreground">Lock proof CID</label>
+              <input
+                type="text"
+                value={mintProofCid}
+                onChange={(event) => setMintProofCid(event.target.value)}
+                placeholder="bafy..."
+                className="w-full rounded-xl border border-border/40 bg-background/60 px-3 py-2 text-sm text-foreground focus:border-primary focus:outline-none"
+              />
+            </div>
+            <Button type="submit" disabled={mintSubmit.isSubmitting || !bridgeConfigured}>
+              {mintSubmit.isSubmitting ? <Loader /> : "Mint"}
+            </Button>
+          </form>
 
-              <div className="mt-4 space-y-3">
-                {historyMock.map((tx) => (
-                  <article
-                    key={tx.id}
-                    className="rounded-xl border border-border/40 bg-background/40 p-4 text-sm"
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      <div>
-                        <p className="text-xs text-muted-foreground">{tx.id}</p>
-                        <p className="mt-1 text-sm font-semibold text-foreground">
-                          {tx.amount} {tx.asset}
-                        </p>
-                        <p className="text-xs text-muted-foreground">{formatDirection(tx.chainFrom, tx.chainTo)}</p>
-                      </div>
-                      <span className={`rounded-full px-2 py-1 text-xs font-semibold ${statusStyles[tx.status]}`}>
-                        {tx.status}
-                      </span>
-                    </div>
-                    <div className="mt-3 flex items-center justify-between text-xs text-muted-foreground">
-                      <span>{new Date(tx.ts).toLocaleString()}</span>
-                      <div className="flex items-center gap-2">
-                        <CopyHash value={tx.hash} />
-                        {tx.explorer ? (
-                          <button
-                            type="button"
-                            onClick={() => window.open(tx.explorer ?? `${explorerByChain[tx.chainTo]}${tx.hash}`, "_blank", "noopener,noreferrer")}
-                            className="rounded-full border border-border/50 bg-background/40 px-3 py-1 font-semibold text-foreground transition hover:border-primary/50 hover:text-primary"
-                          >
-                            Explorer
-                          </button>
-                        ) : null}
-                      </div>
-                    </div>
-                  </article>
-                ))}
-              </div>
-            </section>
-          </motion.aside>
-        </div>
-      </motion.div>
+          <form
+            className="flex flex-col gap-4 rounded-2xl border border-border/40 bg-card/60 p-5"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void handleRedeemSubmit();
+            }}
+          >
+            <div>
+              <h2 className="text-lg font-semibold text-foreground">Redeem SUSD (Stellar → EVM)</h2>
+              <p className="text-xs text-muted-foreground">
+                Record a redeem intent and publish the metadata CID for downstream release.
+              </p>
+            </div>
+            <div className="space-y-2">
+              <label className="text-xs font-semibold uppercase text-muted-foreground">Amount</label>
+              <input
+                type="number"
+                step="0.0000001"
+                min="0"
+                value={redeemAmount}
+                onChange={(event) => setRedeemAmount(event.target.value)}
+                placeholder="0.0"
+                className="w-full rounded-xl border border-border/40 bg-background/60 px-3 py-2 text-sm text-foreground focus:border-primary focus:outline-none"
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-xs font-semibold uppercase text-muted-foreground">EVM recipient</label>
+              <input
+                type="text"
+                value={redeemRecipient}
+                onChange={(event) => setRedeemRecipient(event.target.value)}
+                placeholder="0x..."
+                className="w-full rounded-xl border border-border/40 bg-background/60 px-3 py-2 text-sm text-foreground focus:border-primary focus:outline-none"
+              />
+            </div>
+            <Button type="submit" disabled={redeemSubmit.isSubmitting || !bridgeConfigured}>
+              {redeemSubmit.isSubmitting ? <Loader /> : "Redeem"}
+            </Button>
+          </form>
+        </section>
+
+        <section className="mb-12 rounded-2xl border border-border/40 bg-card/60 p-5">
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-4">
+            <div>
+              <h2 className="text-lg font-semibold text-foreground">Bridge activity</h2>
+              <p className="text-xs text-muted-foreground">
+                Every request is recorded on Stellar with a memo hash tied to its IPFS metadata.
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {TABS.map((tab) => (
+                <button
+                  key={tab.key}
+                  type="button"
+                  onClick={() => setActiveTab(tab.key)}
+                  className={`rounded-full px-3 py-1 text-xs font-semibold uppercase transition ${
+                    activeTab === tab.key
+                      ? "bg-primary text-primary-foreground shadow"
+                      : "bg-border/40 text-muted-foreground hover:bg-border/60"
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+          </div>
+          {renderList()}
+        </section>
+
+        {debugEnabled ? (
+          <section className="rounded-2xl border border-dashed border-primary/40 bg-primary/5 p-5 text-xs text-muted-foreground">
+            <div className="mb-3 flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-primary">Debug snapshot</h3>
+              <Button
+                type="button"
+                variant="secondary"
+                className="px-3 py-1 text-xs"
+                onClick={() => {
+                  console.group("[bridge:debug]");
+                  console.table({
+                    locks: locks?.length ?? 0,
+                    mints: mints?.length ?? 0,
+                    redeems: redeems?.length ?? 0,
+                    locked: statsData.totalLockedXlm,
+                    minted: statsData.totalMintedSusd,
+                    redeemed: statsData.totalRedeemedSusd,
+                  });
+                  console.groupEnd();
+                  toast({
+                    title: "Debug data logged",
+                    description: "Inspect the console for bridge snapshot details.",
+                    variant: "info",
+                  });
+                }}
+              >
+                Log snapshot
+              </Button>
+            </div>
+            <p>
+              Locks: {locks?.length ?? 0} · Mints: {mints?.length ?? 0} · Redeems: {redeems?.length ?? 0} · Stats fetched:{" "}
+              {statsLoading ? "pending" : "ready"}
+            </p>
+          </section>
+        ) : null}
+      </div>
     </LayoutShell>
   );
-}
+};
+
+export default BridgePage;

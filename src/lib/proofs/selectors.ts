@@ -2,6 +2,8 @@
 
 import { getViaGateway } from "@/src/lib/ipfs/client";
 import type { Attestation, ProofStatus, ProofType } from "@/src/lib/types/proofs";
+import type { BridgeLock, BridgeMint, BridgeRedeem } from "@/src/lib/types/bridge";
+import { BRIDGE_PUBLIC_ACCOUNT } from "@/src/utils/constants";
 import type { StoredProof } from "@/src/lib/proofs/storage";
 import { formatDate, formatDateTime, formatRelativeTime } from "@/src/lib/utils/format";
 import { shortHash } from "@/src/lib/utils/format";
@@ -79,10 +81,17 @@ const QUICK_CARD_DESCRIPTIONS: Record<ProofType, string> = {
   Ownership: "Ownership documentation submitted by custodial entities.",
   Appraisal: "Third-party valuation or appraisal supporting reserve claims.",
   "Reserve Proof": "Weekly reserve JSON committed on-chain via memo hash.",
+  "Bridge Proof": "Bridge lock/mint/redeem metadata anchored on Stellar via memo hash.",
   Other: "Additional documentation supplied by the custodian.",
 };
 
-const PRIMARY_CARD_TYPES: ProofType[] = ["Audit Report", "Insurance Policy", "Legal Agreement", "Reserve Proof"];
+const PRIMARY_CARD_TYPES: ProofType[] = [
+  "Audit Report",
+  "Insurance Policy",
+  "Legal Agreement",
+  "Reserve Proof",
+  "Bridge Proof",
+];
 
 const normalizeStatus = (status?: ProofStatus): ProofStatus => {
   if (status === "Verified" || status === "Invalid" || status === "Recorded") return status;
@@ -169,9 +178,51 @@ export const buildProofList = (
   stored: StoredProof[],
   attestations: Attestation[],
   reserveProofs: ReserveProofRecord[] = [],
+  bridgeLocks: BridgeLock[] = [],
+  bridgeMints: BridgeMint[] = [],
+  bridgeRedeems: BridgeRedeem[] = [],
 ): ProofListItem[] => {
   const maps = buildAttestationMaps(attestations);
   const custodianAccountUpper = toUpper(process.env.NEXT_PUBLIC_CUSTODIAN_ACCOUNT);
+
+  const mapBridgeRecord = (
+    record: BridgeLock | BridgeMint | BridgeRedeem,
+    kind: "Lock" | "Mint" | "Redeem",
+    subtitleValue: string,
+  ): ProofListItem => {
+    const memoHex = toHexPrefixed(record.memoHashHex);
+    const uploaded = formatUploadedAt(record.createdAt);
+    const subtitleParts = [subtitleValue];
+    if (record.status !== "Verified") {
+      subtitleParts.push(record.metadataError ? `metadata: ${record.metadataError}` : "metadata pending");
+    }
+    const signer =
+      "account" in record && typeof record.account === "string" && record.account.length > 0
+        ? record.account
+        : BRIDGE_PUBLIC_ACCOUNT;
+    return {
+      id: `bridge:${kind}:${record.id}`,
+      type: "Bridge Proof",
+      title: `Bridge ${kind}`,
+      subtitle: subtitleParts.join(" · "),
+      cid: record.proofCid,
+      metadataCid: record.proofCid,
+      sha256: memoHex,
+      hashLabel: memoHex,
+      hashShort: memoHex ? shortHash(memoHex, 8, 6) : "",
+      uploadedAt: uploaded.iso,
+      uploadedAtLabel: uploaded.label,
+      status: record.status,
+      verifiedBy: signer,
+      verifiedAt: record.createdAt,
+      verifiedAtLabel: formatDateTime(record.createdAt),
+      txHash: record.id,
+      gatewayUrl: getViaGateway(record.proofCid),
+      size: undefined,
+      mime: "application/json",
+      source: "attestation",
+    };
+  };
 
   const list: ProofListItem[] = stored.map((entry) => {
     const matched = resolveJoinedAttestation(entry, maps, custodianAccountUpper);
@@ -235,7 +286,19 @@ export const buildProofList = (
     } satisfies ProofListItem;
   });
 
-  return [...list, ...reserveItems].sort(
+  const bridgeItems = [
+    ...bridgeLocks.map((record) =>
+      mapBridgeRecord(record, "Lock", `Recipient · ${record.recipient || "pending recipient"}`),
+    ),
+    ...bridgeMints.map((record) =>
+      mapBridgeRecord(record, "Mint", `Target · ${record.targetAccount || "pending target"}`),
+    ),
+    ...bridgeRedeems.map((record) =>
+      mapBridgeRecord(record, "Redeem", `Recipient · ${record.recipient || "pending recipient"}`),
+    ),
+  ];
+
+  return [...list, ...reserveItems, ...bridgeItems].sort(
     (a, b) => new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime(),
   );
 };

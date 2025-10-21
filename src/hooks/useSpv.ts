@@ -1,7 +1,7 @@
 "use client";
 
 import useSWR from "swr";
-import { getServer as getHorizonServer } from "@/src/lib/stellar/sdk";
+import { getHorizonServer } from "@/src/lib/stellar/horizon";
 import { swrDefaults, wrapCall, type RateLimitError } from "@/src/hooks/horizon";
 import { fetchSpvIncome } from "@/src/lib/spv/ingest";
 import { getHolders } from "@/src/lib/spv/holders";

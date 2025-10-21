@@ -26,7 +26,7 @@ export const AttestationMetadataSchema = z.object({
         .object({
           type: z.string().optional(),
           name: z.string().optional(),
-          valueUSD: z.number().optional(),
+          valueUSD: z.coerce.number().optional(),
         })
         .optional(),
     })

@@ -1,5 +1,3 @@
-import "server-only";
-
 import StellarSdk from "stellar-sdk";
 
 type ServerConstructor = new (url: string) => unknown;
@@ -56,6 +54,22 @@ export const getSpvPublic = () => {
   const account = process.env.SPV_ACCOUNT ?? process.env.NEXT_PUBLIC_SPV_ACCOUNT;
   if (!account) {
     throw new Error("SPV_ACCOUNT is not configured.");
+  }
+  return account;
+};
+
+export const getBridgeKeypair = (): KeypairInstance => {
+  const secret = process.env.BRIDGE_SECRET;
+  if (!secret) {
+    throw new Error("BRIDGE_SECRET is not configured.");
+  }
+  return keypair.fromSecret(secret) as KeypairInstance;
+};
+
+export const getBridgeAccount = () => {
+  const account = process.env.BRIDGE_ACCOUNT ?? process.env.NEXT_PUBLIC_BRIDGE_ACCOUNT;
+  if (!account) {
+    throw new Error("BRIDGE_ACCOUNT is not configured.");
   }
   return account;
 };

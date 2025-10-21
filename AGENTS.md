@@ -1,5 +1,7 @@
 ## Agent Log
 
+- 2025-10-21: Codex (GPT-5) addressing bridge CID alias + auto-fill tasks from todo before resuming UI verification.
+- 2025-10-21: Codex (GPT-5) acknowledged bridge/todo mandate; reading docs and prepping full Bridge + SDK separation fixes before implementation.
 - 2025-10-21: Codex (GPT-5) resuming Phase 4 sprint; reviewed docs/todo and starting SDK split + custodian/IPFS fixes per hackathon brief.
 - 2025-10-21: Codex (GPT-5) taking over hackathon Phase 4 tasks; reviewing docs, syncing SPV distribution/reserve pipeline before dashboard/proofs wiring.
 

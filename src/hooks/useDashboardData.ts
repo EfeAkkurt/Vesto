@@ -1,7 +1,7 @@
 "use client";
 
 import useSWR from "swr";
-import { getServer as getHorizonServer } from "@/src/lib/stellar/sdk";
+import { getHorizonServer } from "@/src/lib/stellar/horizon";
 import { wrapCall, swrDefaults, type RateLimitError } from "@/src/hooks/horizon";
 import { resolveAttestations } from "@/src/lib/attestations/store";
 import { deriveKpi, buildReservePoints } from "@/src/lib/dashboard/transformers";

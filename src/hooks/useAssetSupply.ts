@@ -1,7 +1,7 @@
 "use client";
 
 import useSWR from "swr";
-import { getServer as getHorizonServer } from "@/src/lib/stellar/sdk";
+import { getHorizonServer } from "@/src/lib/stellar/horizon";
 
 type HorizonServerLike = {
   assets(): {
