@@ -12,6 +12,7 @@ import { SpvStatus } from "@/src/components/proofs/SpvStatus";
 import { ReserveMiniChart } from "@/src/components/proofs/ReserveMiniChart";
 import { ProofRowActions } from "@/src/components/proofs/ProofRowActions";
 import { ProofsEmpty } from "@/src/components/proofs/ProofsEmpty";
+import { ProofDrawer } from "@/src/components/proofs/ProofDrawer";
 import { SkeletonRow } from "@/src/components/shared/SkeletonRow";
 import { useToast } from "@/src/components/ui/Toast";
 import { Loader } from "@/src/components/ui/Loader";
@@ -151,6 +152,8 @@ const ProofsPage = () => {
   const [pageIndex, setPageIndex] = useState(0);
   const [debugOpen, setDebugOpen] = useState(false);
   const [peekOpen, setPeekOpen] = useState(false);
+  const [selectedProof, setSelectedProof] = useState<ProofListItem | null>(null);
+  const [drawerOpen, setDrawerOpen] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const custodianAccount = wallet.accountId ?? (CUSTODIAN_ACCOUNT || undefined);
@@ -435,6 +438,16 @@ const ProofsPage = () => {
       effectsResponse.mutate?.(),
     ]);
   };
+
+  const handleProofInspect = useCallback((proof: ProofListItem) => {
+    setSelectedProof(proof);
+    setDrawerOpen(true);
+  }, []);
+
+  const handleDrawerClose = useCallback(() => {
+    setDrawerOpen(false);
+    setSelectedProof(null);
+  }, []);
 
   const hasQuickCardData = quickCards.some((card) => card.cid);
 
@@ -756,7 +769,13 @@ const ProofsPage = () => {
                         <div className="flex flex-wrap items-center gap-3">
                           <div className="flex items-center gap-2">
                             <span className="uppercase tracking-wide">Hash</span>
-                            <CopyHash value={proof.hashLabel} />
+                            <CopyHash
+                              value={proof.hashLabel}
+                              short={false}
+                              variant="plain"
+                              className="justify-start"
+                              textClassName="ellipsis max-w-[200px]"
+                            />
                           </div>
                           <div>
                             <span className="uppercase tracking-wide">Verified by </span>
@@ -773,6 +792,7 @@ const ProofsPage = () => {
                             url={proof.gatewayUrl}
                             hash={proof.hashLabel}
                             fileName={toDownloadName(proof)}
+                            onInspect={() => handleProofInspect(proof)}
                           />
                         </div>
                       </div>
@@ -810,6 +830,7 @@ const ProofsPage = () => {
           </div>
         </section>
       </motion.div>
+      <ProofDrawer open={drawerOpen} onClose={handleDrawerClose} proof={selectedProof} />
     </LayoutShell>
   );
 };

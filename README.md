@@ -1,4 +1,6 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+<p align="center">
+  <img src="./public/banner.png" alt="Vesto Hero Banner" width="100%">
+</p>
 
 ## Getting Started
 

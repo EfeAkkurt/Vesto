@@ -578,7 +578,7 @@ useEffect(() => {
                   return (
                     <div
                       key={requestKey}
-                      className={`overflow-hidden rounded-2xl border ${
+                      className={`mb-4 max-w-[1100px] overflow-hidden rounded-2xl border ${
                         isSelected ? "border-primary/60 bg-primary/5" : "border-white/5 bg-white/[0.02]"
                       } p-5 shadow-sm transition md:p-6`}
                     >
@@ -619,7 +619,13 @@ useEffect(() => {
                           <div className="space-y-1">
                             <span className="font-medium text-foreground/80">{identifierLabel}</span>
                             <div className="flex flex-wrap items-center gap-2">
-                              <CopyHash value={identifierValue} />
+                              <CopyHash
+                                value={identifierValue}
+                                short={false}
+                                variant="plain"
+                                className="justify-start"
+                                textClassName="ellipsis max-w-[200px]"
+                              />
                               {metadataLink ? (
                                 <button
                                   type="button"
@@ -635,7 +641,13 @@ useEffect(() => {
                         {proofLabel && proofValue ? (
                           <div className="space-y-1">
                             <span className="font-medium text-foreground/80">{proofLabel}</span>
-                            <CopyHash value={proofValue} />
+                            <CopyHash
+                              value={proofValue}
+                              short={false}
+                              variant="plain"
+                              className="justify-start"
+                              textClassName="ellipsis max-w-[200px]"
+                            />
                           </div>
                         ) : (
                           <div className="space-y-1">
@@ -675,10 +687,12 @@ useEffect(() => {
                           type="button"
                           onClick={() => setSelectedRequest(request)}
                           disabled={request.status === "approved"}
-                          className={`rounded-full px-3 py-1 text-xs font-semibold transition ${
+                          className={`h-9 rounded-lg px-3 text-sm font-medium transition ${
                             request.status === "approved"
-                              ? "cursor-not-allowed border border-border/40 text-muted-foreground"
-                              : "border border-primary/40 text-primary hover:border-primary/60 hover:text-primary"
+                              ? "cursor-not-allowed border border-white/10 bg-white/[0.02] text-zinc-500"
+                              : isSelected
+                                ? "border border-primary/60 bg-primary/10 text-primary hover:border-primary/70"
+                                : "border border-white/15 bg-transparent text-zinc-100 hover:border-primary/60 hover:text-primary"
                           }`}
                         >
                           {request.status === "approved" ? "Attested" : isSelected ? "Responding" : "Respond"}
@@ -687,7 +701,7 @@ useEffect(() => {
                           <button
                             type="button"
                             onClick={() => handleAttestationOpen(request.attestation!)}
-                            className="rounded-full border border-border/50 px-3 py-1 text-xs font-semibold text-foreground transition hover:border-primary/50 hover:text-primary"
+                            className="h-9 rounded-lg border border-white/15 px-3 text-sm font-medium text-zinc-100 transition hover:border-primary/60 hover:text-primary"
                           >
                             View Attestation
                           </button>

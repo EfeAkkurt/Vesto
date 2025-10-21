@@ -10,9 +10,10 @@ export type ProofRowActionsProps = {
   url: string;
   hash: string;
   fileName?: string;
+  onInspect?: () => void;
 };
 
-export const ProofRowActions = ({ url, hash, fileName }: ProofRowActionsProps) => {
+export const ProofRowActions = ({ url, hash, fileName, onInspect }: ProofRowActionsProps) => {
   const { toast } = useToast();
   const [downloading, setDownloading] = useState(false);
 
@@ -55,7 +56,7 @@ export const ProofRowActions = ({ url, hash, fileName }: ProofRowActionsProps) =
         type="button"
         onClick={handleView}
         disabled={!url}
-        className="inline-flex items-center gap-1 rounded-full border border-border/50 bg-background/40 px-3 py-1 text-xs font-semibold text-foreground transition hover:border-primary/50 hover:text-primary disabled:opacity-60"
+        className="inline-flex h-9 items-center gap-2 rounded-lg border border-white/15 px-3 text-sm font-medium text-zinc-100 transition hover:border-primary/60 hover:text-primary disabled:opacity-60"
       >
         <svg className="size-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3">
           <path d="M3 8s2.5-4 5-4 5 4 5 4-2.5 4-5 4-5-4-5-4z" />
@@ -67,7 +68,7 @@ export const ProofRowActions = ({ url, hash, fileName }: ProofRowActionsProps) =
         type="button"
         onClick={handleDownload}
         disabled={downloading || !url}
-        className="inline-flex items-center gap-2 rounded-full border border-border/50 bg-background/40 px-3 py-1 text-xs font-semibold text-foreground transition hover:border-primary/50 hover:text-primary disabled:opacity-60"
+        className="inline-flex h-9 items-center gap-2 rounded-lg border border-white/15 px-3 text-sm font-medium text-zinc-100 transition hover:border-primary/60 hover:text-primary disabled:opacity-60"
       >
         {downloading ? <Loader size="sm" /> : (
           <svg className="size-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3">
@@ -78,7 +79,16 @@ export const ProofRowActions = ({ url, hash, fileName }: ProofRowActionsProps) =
         )}
         Download
       </button>
-      <CopyHash value={hash} />
+      {onInspect ? (
+        <button
+          type="button"
+          onClick={onInspect}
+          className="inline-flex h-9 items-center gap-2 rounded-lg border border-white/15 px-3 text-sm font-medium text-zinc-100 transition hover:border-primary/60 hover:text-primary"
+        >
+          Details
+        </button>
+      ) : null}
+      <CopyHash value={hash} variant="plain" className="justify-start" />
     </div>
   );
 };

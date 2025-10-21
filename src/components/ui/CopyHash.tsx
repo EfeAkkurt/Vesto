@@ -9,9 +9,17 @@ export type CopyHashProps = {
   value: string;
   short?: boolean;
   className?: string;
+  variant?: "chip" | "plain";
+  textClassName?: string;
 };
 
-export const CopyHash = ({ value, short = true, className }: CopyHashProps) => {
+export const CopyHash = ({
+  value,
+  short = true,
+  className,
+  variant = "chip",
+  textClassName,
+}: CopyHashProps) => {
   const { toast } = useToast();
   const [isCopying, setIsCopying] = useState(false);
   const label = short ? shortHash(value) : value;
@@ -38,21 +46,31 @@ export const CopyHash = ({ value, short = true, className }: CopyHashProps) => {
     }
   };
 
+  const baseClass =
+    variant === "plain"
+      ? "group inline-flex items-center gap-1 rounded-none border border-transparent bg-transparent px-0 py-0 text-sm font-medium text-zinc-100 transition hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+      : "group inline-flex items-center gap-2 rounded-full border border-border/60 bg-muted/20 px-3 py-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground transition hover:border-primary/60 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 focus-visible:ring-offset-2 focus-visible:ring-offset-background no-wrap";
+
+  const textClasses =
+    variant === "plain"
+      ? cn("break-any font-medium text-sm text-zinc-100", textClassName)
+      : cn("font-mono text-[11px]", textClassName);
+
   return (
     <button
       type="button"
       onClick={handleCopy}
-      className={cn(
-        "group inline-flex items-center gap-2 rounded-full border border-border/60 bg-muted/20 px-3 py-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground transition hover:border-primary/60 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 focus-visible:ring-offset-2 focus-visible:ring-offset-background no-wrap",
-        className,
-      )}
+      className={cn(baseClass, className)}
       aria-label={`Copy hash ${value}`}
       disabled={isCopying}
     >
-      <span className="font-mono text-[11px]">{label}</span>
+      <span className={textClasses}>{label}</span>
       <svg
         aria-hidden
-        className="size-3.5 text-muted-foreground transition group-hover:text-primary"
+        className={cn(
+          "text-muted-foreground transition group-hover:text-primary",
+          variant === "plain" ? "size-3" : "size-3.5",
+        )}
         viewBox="0 0 16 16"
         fill="none"
         stroke="currentColor"

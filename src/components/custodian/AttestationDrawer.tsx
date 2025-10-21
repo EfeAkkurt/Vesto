@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { CopyHash } from "@/src/components/ui/CopyHash";
@@ -13,6 +13,8 @@ import { TokenRequestMetadataSchema, type TokenRequestMetadata } from "@/src/lib
 import { verifyAttestation } from "@/src/lib/attestations/verify";
 import { debug } from "@/src/lib/logging/logger";
 import { MANAGE_DATA_SIGNATURE } from "@/src/lib/types/proofs";
+import { cn } from "@/src/utils/cn";
+import { CUSTODIAN_STATUS_THEME } from "@/src/components/custodian/statusTheme";
 
 export type AttestationDrawerProps = {
   open: boolean;
@@ -29,12 +31,39 @@ export type AttestationDrawerProps = {
   ) => void;
 };
 
-const statusBadge: Record<Attestation["status"], string> = {
-  Verified: "bg-primary/15 text-primary",
-  Recorded: "bg-sky-400/15 text-sky-200",
-  Pending: "bg-amber-400/15 text-amber-200",
-  Invalid: "bg-rose-400/15 text-rose-300",
+const VERIFICATION_THEME: Record<
+  VerificationState,
+  { label: string; className: string }
+> = {
+  idle: { label: "Pending", className: CUSTODIAN_STATUS_THEME.Pending.badge },
+  loading: { label: "Checking", className: CUSTODIAN_STATUS_THEME.Pending.badge },
+  recorded: { label: "Recorded", className: CUSTODIAN_STATUS_THEME.Recorded.badge },
+  verified: { label: "Verified", className: CUSTODIAN_STATUS_THEME.Verified.badge },
+  invalid: { label: "Invalid", className: CUSTODIAN_STATUS_THEME.Invalid.badge },
+  error: { label: "Error", className: "border border-rose-400/30 bg-rose-500/10 text-rose-300" },
 };
+
+type DrawerRowProps = {
+  label: string;
+  children: ReactNode;
+  align?: "start" | "end";
+  wrap?: boolean;
+};
+
+const DrawerRow = ({ label, children, align = "end", wrap = false }: DrawerRowProps) => (
+  <div className="flex items-start gap-4">
+    <dt className="w-32 shrink-0 text-sm text-zinc-400">{label}</dt>
+    <dd
+      className={cn(
+        "flex flex-1 items-center gap-2",
+        align === "end" ? "justify-end text-right" : "justify-start text-left",
+        wrap ? "flex-wrap" : "flex-nowrap",
+      )}
+    >
+      {children}
+    </dd>
+  </div>
+);
 
 type VerificationState = "idle" | "loading" | "recorded" | "verified" | "invalid" | "error";
 
@@ -306,155 +335,143 @@ export const AttestationDrawer = ({ open, onClose, item, onStatusUpdate }: Attes
             animate={prefersReducedMotion ? { x: 0, opacity: 1 } : { x: 0, opacity: 1 }}
             exit={prefersReducedMotion ? { x: 0, opacity: 0 } : { x: "100%", opacity: 1 }}
             transition={{ duration: 0.25, ease: [0.33, 1, 0.68, 1] }}
-            className="h-full w-full max-w-md overflow-y-auto border-l border-border/60 bg-card/95 p-6 shadow-2xl"
+            className="h-full w-full max-w-[440px] overflow-y-auto rounded-2xl border border-white/5 bg-white/[0.02] p-6 shadow-2xl"
           >
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <h2 id="attestation-drawer-title" className="text-xl font-semibold text-foreground">
+            <div className="flex items-start justify-between gap-3">
+              <div className="space-y-2">
+                <h2 id="attestation-drawer-title" className="text-lg font-semibold tracking-tight text-zinc-100">
                   Week {content.week}
                 </h2>
-                <span className={`mt-2 inline-flex rounded-full px-3 py-1 text-xs font-semibold ${statusBadge[content.status]}`}>
+                <span
+                  className={cn(
+                    "inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium",
+                    CUSTODIAN_STATUS_THEME[content.status].badge,
+                  )}
+                >
                   {content.status}
                 </span>
               </div>
               <button
                 type="button"
                 onClick={onClose}
-                className="rounded-full border border-border/50 px-3 py-1 text-xs font-semibold text-muted-foreground transition hover:border-primary/50 hover:text-primary"
+                className="h-9 rounded-lg border border-white/10 px-3 text-sm font-medium text-zinc-300 transition hover:border-white/20 hover:text-zinc-100"
               >
                 Close
               </button>
             </div>
 
-            <div className="mt-6 space-y-4 text-sm">
-              <div className="flex items-center justify-between">
-                <span className="text-muted-foreground">Reserve</span>
-                <span className="font-semibold text-foreground">
+            <dl className="mt-6 space-y-4">
+              <DrawerRow label="Reserve">
+                <span className="break-any text-sm font-medium text-zinc-100">
                   {hasVerifiedReserve ? formatUSD(displayReserveUSD) : "—"}
                 </span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-muted-foreground">Verification</span>
+              </DrawerRow>
+
+              <DrawerRow label="Verification">
                 <span
-                  className={
-                    verification === "verified"
-                      ? "rounded-full bg-primary/15 px-3 py-1 text-xs font-semibold text-primary"
-                      : verification === "recorded"
-                        ? "rounded-full bg-sky-400/15 px-3 py-1 text-xs font-semibold text-sky-200"
-                        : verification === "invalid"
-                          ? "rounded-full bg-rose-400/15 px-3 py-1 text-xs font-semibold text-rose-300"
-                          : "rounded-full bg-border/40 px-3 py-1 text-xs font-semibold text-muted-foreground"
-                  }
+                  className={cn(
+                    "inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium",
+                    VERIFICATION_THEME[verification].className,
+                  )}
                 >
-                  {verification === "loading"
-                    ? "Checking"
-                    : verification === "verified"
-                      ? "Verified"
-                      : verification === "recorded"
-                        ? "Recorded"
-                        : verification === "invalid"
-                          ? "Invalid"
-                          : verification === "error"
-                        ? "Error"
-                        : "Pending"}
+                  {VERIFICATION_THEME[verification].label}
                 </span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-muted-foreground">Signed by</span>
-                <span className="font-mono text-xs text-foreground">
-                  {(displayTxSigner && displayTxSigner !== "" ? displayTxSigner : "—")} • {displaySigCount} sig
-                </span>
-              </div>
-              {displayFeeXlm != null ? (
-                <div className="flex items-center justify-between">
-                  <span className="text-muted-foreground">Fee</span>
-                  <span className="font-mono text-xs text-foreground">{formatXLM(displayFeeXlm)} XLM</span>
-                </div>
-              ) : null}
-              <div>
-                <span className="text-muted-foreground">Proof</span>
-                <div className="mt-2 flex items-center gap-2">
-                  {proofHash ? <CopyHash value={proofHash} /> : <span className="text-foreground/60">—</span>}
-                  {proofUrl ? (
-                    <button
-                      type="button"
-                      onClick={() => window.open(proofUrl, "_blank", "noopener,noreferrer")}
-                      className="rounded-full border border-border/60 px-3 py-1 text-xs font-semibold text-foreground transition hover:border-primary/50 hover:text-primary"
-                    >
-                      Open
-                    </button>
-                  ) : null}
-                </div>
-              </div>
-              <div>
-                <span className="text-muted-foreground">Metadata CID</span>
-                <div className="mt-2 flex items-center gap-2">
-                  <CopyHash value={content.metadataCid} />
+              </DrawerRow>
+
+              <DrawerRow label="Proof">
+                {proofHash ? (
+                  <>
+                    <CopyHash value={proofHash} short={false} variant="plain" />
+                    {proofUrl ? (
+                      <button
+                        type="button"
+                        onClick={() => window.open(proofUrl, "_blank", "noopener,noreferrer")}
+                        className="h-9 rounded-lg border border-white/10 px-3 text-sm font-medium text-zinc-100 transition hover:border-white/20 hover:text-white"
+                      >
+                        Open
+                      </button>
+                    ) : null}
+                  </>
+                ) : (
+                  <span className="break-any text-sm font-medium text-zinc-500">—</span>
+                )}
+              </DrawerRow>
+
+              <DrawerRow label="Metadata CID" align="end" wrap>
+                <div className="flex flex-1 flex-nowrap items-center justify-end gap-2">
+                  <CopyHash value={content.metadataCid} short={false} variant="plain" />
                   <button
                     type="button"
                     onClick={() => window.open(getViaGateway(content.metadataCid), "_blank", "noopener,noreferrer")}
-                    className="rounded-full border border-border/60 px-3 py-1 text-xs font-semibold text-foreground transition hover:border-primary/50 hover:text-primary"
+                    className="h-9 rounded-lg border border-white/10 px-3 text-sm font-medium text-zinc-100 transition hover:border-white/20 hover:text-white"
                   >
                     Gateway
                   </button>
                 </div>
                 {content.metadataFetchFailed && content.status !== "Verified" ? (
-                  <p className="mt-1 text-[11px] text-amber-200">
-                    Metadata fetch pending. IPFS gateway is still syncing this CID.
-                  </p>
+                  <span className="w-full text-right text-sm italic text-zinc-400">
+                    IPFS gateway is syncing this CID — please retry soon.
+                  </span>
                 ) : null}
-              </div>
-              <div>
-                <span className="text-muted-foreground">Tx Hash</span>
-                <div className="mt-2 flex items-center gap-2">
-                  <CopyHash value={content.txHash} />
-                </div>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-muted-foreground">Signed By</span>
-                <span className="font-semibold text-foreground">{displaySignedBy}</span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-muted-foreground">Timestamp</span>
-                <span className="font-semibold text-foreground">{displayTimestamp ? formatDateTime(displayTimestamp) : "—"}</span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-muted-foreground">Signature</span>
+              </DrawerRow>
+
+              <DrawerRow label="Tx Hash">
+                <CopyHash value={content.txHash} short={false} variant="plain" />
+              </DrawerRow>
+
+              <DrawerRow label="Signed By">
+                {displaySignedBy && displaySignedBy !== "—" ? (
+                  <CopyHash value={displaySignedBy} variant="plain" />
+                ) : (
+                  <span className="break-any text-sm font-medium text-zinc-500">—</span>
+                )}
+              </DrawerRow>
+
+              <DrawerRow label="Timestamp">
+                <span className="break-any text-sm font-medium text-zinc-100">
+                  {displayTimestamp ? formatDateTime(displayTimestamp) : "—"}
+                </span>
+              </DrawerRow>
+
+              <DrawerRow label="Signature">
                 {manageDataSignature ? (
-                  <span className="rounded-full border border-primary/40 bg-primary/10 px-2 py-0.5 text-[11px] font-semibold text-primary">
+                  <span className="inline-flex items-center rounded-full border border-emerald-400/30 bg-emerald-500/10 px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-emerald-300">
                     Manage data
                   </span>
                 ) : displaySignature ? (
-                  <CopyHash value={displaySignature} />
+                  <CopyHash value={displaySignature} short={false} variant="plain" />
                 ) : (
-                  <span className="text-foreground/80">{signatureFallbackLabel}</span>
+                  <span className="text-sm italic text-zinc-400">{signatureFallbackLabel}</span>
                 )}
+              </DrawerRow>
+            </dl>
+
+            {metadata ? (
+              <div className="mt-6 space-y-3">
+                <p className="text-xs uppercase tracking-wide text-zinc-500">Metadata</p>
+                <pre className="max-h-80 overflow-auto rounded-xl border border-white/5 bg-white/[0.02] p-3 text-xs text-zinc-200">
+                  {JSON.stringify(metadata, null, 2)}
+                </pre>
               </div>
-              {metadata ? (
-                <div className="rounded-xl border border-border/40 bg-border/10 p-3 text-xs">
-                  <p className="mb-1 text-[11px] uppercase tracking-wide text-muted-foreground">Metadata</p>
-                  <pre className="whitespace-pre-wrap break-all text-foreground/80">
-                    {JSON.stringify(metadata, null, 2)}
-                  </pre>
-                </div>
-              ) : requestMetadata ? (
-                <div className="rounded-xl border border-border/40 bg-border/10 p-3 text-xs">
-                  <p className="mb-1 text-[11px] uppercase tracking-wide text-muted-foreground">Request metadata</p>
-                  <pre className="whitespace-pre-wrap break-all text-foreground/80">
-                    {JSON.stringify(requestMetadata, null, 2)}
-                  </pre>
-                </div>
-              ) : verification === "loading" ? (
-                <p className="text-xs text-muted-foreground">Fetching metadata from IPFS…</p>
-              ) : null}
-              {verification === "error" && verificationError ? (
-                <p className="text-xs text-rose-400">Verification error: {verificationError}</p>
-              ) : null}
-              <div className="mt-6 border-t border-white/10 pt-4 text-[11px] text-muted-foreground no-wrap">
-                Fee • {displayFeeXlm != null ? `${formatXLM(displayFeeXlm)} XLM` : "—"}
-                {" "}· Signed by {displayTxSigner ? shortHash(displayTxSigner, 6, 6) : "—"}
-                {" "}· {displaySigCount ?? 0} sig
+            ) : requestMetadata ? (
+              <div className="mt-6 space-y-3">
+                <p className="text-xs uppercase tracking-wide text-zinc-500">Request metadata</p>
+                <pre className="max-h-80 overflow-auto rounded-xl border border-white/5 bg-white/[0.02] p-3 text-xs text-zinc-200">
+                  {JSON.stringify(requestMetadata, null, 2)}
+                </pre>
               </div>
+            ) : verification === "loading" ? (
+              <p className="mt-6 text-sm text-zinc-400">Fetching metadata from IPFS…</p>
+            ) : null}
+
+            {verification === "error" && verificationError ? (
+              <p className="mt-4 text-sm text-rose-400">Verification error: {verificationError}</p>
+            ) : null}
+
+            <div className="mt-6 flex flex-wrap items-center gap-x-2 border-t border-white/5 pt-4 text-xs text-zinc-500">
+              <span>Fee • {displayFeeXlm != null ? `${formatXLM(displayFeeXlm)} XLM` : "—"}</span>
+              <span>· Signed by {displayTxSigner ? shortHash(displayTxSigner, 6, 6) : "—"}</span>
+              <span>· {displaySigCount ?? 0} sig</span>
             </div>
           </motion.aside>
         </motion.div>
