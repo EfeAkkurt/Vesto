@@ -8,6 +8,9 @@
 # 🧭 Introduction
 Vesto is a fully transparent blockchain-fintech framework that turns real-world reserve proofs, custodial attestations, SPV revenue routing, and cross-chain stablecoin bridging into a single composable product. Every screen, mutation, and memo hash is authored to be auditable in minutes rather than months. The platform automates the journey from a user request to a notarized proof while keeping the UX calm, responsive, and legible enough for regulators, auditors, and engineers to inspect the same source of truth. Built to prove that design, logic, and trust can share one syntax.
 
+## Deployment
+- Stellar Testnet contract: https://stellar.expert/explorer/testnet/contract/CAOL6CWNKD4OKD47B2XB3TXQ6L2SPAST2VVAVHP754Q2ZIOB75QHDW2M
+
 
 
 # 🎯 Purpose & Direction
